@@ -17,12 +17,14 @@ test("portrait layout keeps primary buttons on screen", async ({ page }) => {
   await expect(page.getByTestId("order-card")).toBeVisible();
 });
 
-test("landscape layout puts controls beside the café", async ({ page }) => {
+test("landscape layout puts the station drawer beside the café", async ({ page }) => {
   const vp = page.viewportSize()!;
   await page.setViewportSize({ width: Math.max(vp.width, vp.height), height: Math.min(vp.width, vp.height) });
   await page.goto("/");
   await noHorizontalScroll(page);
-  const aside = (await page.getByRole("complementary", { name: "Café controls" }).boundingBox())!;
+  await expect(page.getByRole("region", { name: "Café controls" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Open station controls" }).click();
+  const aside = (await page.getByRole("region", { name: "Café controls" }).boundingBox())!;
   const card = (await page.getByTestId("order-card").boundingBox())!;
   expect(aside.x).toBeGreaterThan(card.x);
   const shop = (await page.getByRole("button", { name: /Shop/ }).boundingBox())!;

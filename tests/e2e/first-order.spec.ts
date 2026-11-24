@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { coins, openShopAndBuy, press } from "./helpers";
+import { coins, openShopAndBuy, openStation, press } from "./helpers";
 
 test("plays the entire first order, then keeps playing after a reload", async ({ page }, info) => {
   await page.goto("/");
@@ -15,8 +15,13 @@ test("plays the entire first order, then keeps playing after a reload", async ({
   await expect(tutorial).toContainText("Open the Shop");
   await expect(page.locator('[data-tutorial="shop"]')).toHaveClass(/tutorial-glow/);
 
+  // The station menu stays hidden until asked for.
+  await expect(page.getByRole("region", { name: "Café controls" })).toHaveCount(0);
   await openShopAndBuy(page, info, [/Buy strawberry for 5 coins/]);
   await expect(coins(page)).toHaveText("0");
+  const stationBtn = page.getByRole("button", { name: "Open station controls" });
+  await expect(stationBtn).toHaveClass(/tutorial-glow/);
+  await openStation(page, info);
   const chip = page.getByTestId("inv-strawberry");
   await expect(chip).toContainText("×1");
   await expect(chip).toHaveClass(/tutorial-glow/);
@@ -76,6 +81,7 @@ test("tutorial can be skipped and reopened from help", async ({ page }, info) =>
 test("wrong ingredient can be taken back out", async ({ page }, info) => {
   await page.goto("/");
   await openShopAndBuy(page, info, [/Buy strawberry/]);
+  await openStation(page, info);
   await press(page.getByTestId("inv-strawberry"), info);
   await press(page.getByRole("button", { name: "Take fruit out" }), info);
   await expect(page.getByTestId("inv-strawberry")).toContainText("×1");

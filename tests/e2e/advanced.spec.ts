@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { coins, openShopAndBuy, press, seed, stateAtLevel, SAVE_KEY } from "./helpers";
+import { coins, openShopAndBuy, openStation, press, seed, stateAtLevel, SAVE_KEY } from "./helpers";
 import { RECIPES } from "../../lib/game/data";
 
 test("donuts unlock at level 5: fry, sprinkle and serve", async ({ page }, info) => {
@@ -7,6 +7,7 @@ test("donuts unlock at level 5: fry, sprinkle and serve", async ({ page }, info)
   s.currentOrder = { ...s.currentOrder!, customerId: "luna", recipeId: "donut" };
   await seed(page, s);
   await page.goto("/");
+  await openStation(page, info);
   await expect(page.getByRole("tab", { name: /Donuts/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("order-text")).toContainText("Sprinkle Donut");
   await openShopAndBuy(page, info, [/Buy donut dough/, /Buy pink sprinkles/]);
@@ -25,6 +26,7 @@ test("coffee unlocks at level 10: buy beans, brew and serve", async ({ page }, i
   s.currentOrder = { ...s.currentOrder!, customerId: "dan", recipeId: "coffee" };
   await seed(page, s);
   await page.goto("/");
+  await openStation(page, info);
   await expect(page.getByTestId("level")).toHaveText("Lv 10");
   await expect(page.getByRole("tab", { name: /Coffee/ })).toHaveAttribute("aria-selected", "true");
   await openShopAndBuy(page, info, [/Buy coffee beans/]);
@@ -47,6 +49,7 @@ test("croissants unlock at level 15 and bake for one minute, surviving a reload"
   // The 2D counter keeps this long, time-jumping test light on software GL.
   await page.goto("/?nowebgl");
   await page.clock.resume();
+  await openStation(page, info);
   await expect(page.getByRole("tab", { name: /Bakery/ })).toHaveAttribute("aria-selected", "true");
   await openShopAndBuy(page, info, [/Buy egg for 5 coins/, /Buy flour/, /Buy wheat/, /Buy butter/]);
   await expect(coins(page)).toHaveText(String(40 - 18));

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CafeScene, webglAvailable, type SceneView } from "@/lib/scene/CafeScene";
+import { CafeScene, webglAvailable, type PickTarget, type SceneView } from "@/lib/scene/CafeScene";
 import { Fallback2D } from "./Fallback2D";
 
 function forcedOff() {
@@ -13,10 +13,14 @@ function forcedOff() {
 }
 
 /** The 3D café. Falls back to an illustrated 2D counter if WebGL is missing. */
-export function Scene3D({ view }: { view: SceneView }) {
+export function Scene3D({ view, onPick }: { view: SceneView; onPick?: (t: PickTarget) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<CafeScene | null>(null);
   const latest = useRef(view);
+  const pickRef = useRef(onPick);
+  useEffect(() => {
+    pickRef.current = onPick;
+  });
   const [failed, setFailed] = useState(() => forcedOff() || !webglAvailable());
 
   useEffect(() => {
@@ -28,7 +32,7 @@ export function Scene3D({ view }: { view: SceneView }) {
     if (failed || !host.current) return;
     let s: CafeScene | null = null;
     try {
-      s = new CafeScene(host.current);
+      s = new CafeScene(host.current, (t) => pickRef.current?.(t));
       s.setView(latest.current);
       scene.current = s;
     } catch (err) {

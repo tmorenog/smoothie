@@ -1,15 +1,21 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { BANDIT_COAT, CUSTOMERS, DURATIONS, INGREDIENTS, RECIPES, STAFF, type CustomerId, type IngredientId, type StaffId, type Station } from "@/lib/game/data";
-import { xpForLevel, type Avatar, type GameState } from "@/lib/game/engine";
-import { buildAvatar, type AvatarRig } from "./avatar";
+import { unlockedCustomers, xpForLevel, type Avatar, type GameState } from "@/lib/game/engine";
 import { buildCat, type CatRig } from "./cat";
 import { chalkboardTexture, heartTexture, softDotTexture, wallTexture, woodTexture } from "./textures";
+
+/** Things the player can tap in the café. */
+export type PickTarget = Station | "customer" | "till";
 
 export interface SceneView {
   state: GameState;
   focus: Station;
   reducedMotion: boolean;
   happy: boolean;
+  /** Pixels of the canvas covered by HUD/drawer, so the view can re-centre in what's visible. */
+  insetBottom?: number;
+  insetRight?: number;
 }
 
 const TOP = 1.06; // counter top surface height
@@ -67,9 +73,24 @@ export class CafeScene {
   private bandit: CatRig;
   private banditAnchor = new THREE.Group();
   private staffRigs = new Map<StaffId, CatRig>();
-  private avatarRig: AvatarRig | null = null;
-  private avatarKey = "";
-  private avatarAnchor = new THREE.Group();
+  // first-person hands
+  private hands = new THREE.Group();
+  private handParts: THREE.Group[] = [];
+  private handsKey = "";
+  // look-around + picking
+  private yaw = 0;
+  private pitch = 0;
+  private lastFocus: Station | null = null;
+  private lastFrontX = -1.0;
+  private pointer: { id: number; x: number; y: number; lastX: number; lastY: number; drag: boolean } | null = null;
+  private raycaster = new THREE.Raycaster();
+  private pickables: THREE.Object3D[] = [];
+  private ambient: { key: string; rigs: CatRig[] } = { key: "", rigs: [] };
+  private ambientSeats = [
+    { x: -2.15, z: 2.45, ry: 0.35 },
+    { x: 2.55, z: 2.3, ry: -0.4 },
+  ];
+  private envTex: THREE.Texture | null = null;
 
   // blender
   private blenderBase = new THREE.Group();
@@ -107,6 +128,8 @@ export class CafeScene {
   private oilMat!: THREE.MeshStandardMaterial;
   private bubbles: THREE.Mesh[] = [];
   private plateDonut = new THREE.Group();
+  private cupGroup = new THREE.Group();
+  private tillGroup = new THREE.Group();
   private topping = new THREE.Group();
   private bowlItems = new Map<IngredientId, THREE.Object3D>();
   private batter: THREE.Mesh;
@@ -126,12 +149,15 @@ export class CafeScene {
   private heartTex: THREE.Texture;
   private lastHappy = false;
 
-  constructor(private container: HTMLElement) {
+  constructor(
+    private container: HTMLElement,
+    private onPick: (target: PickTarget) => void = () => {},
+  ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "low-power" });
     this.renderer.setPixelRatio(pickPixelRatio());
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.95;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.domElement.setAttribute("aria-hidden", "true");
@@ -141,6 +167,12 @@ export class CafeScene {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color("#3a2a22");
+    // Soft image-based lighting so glass, metal and glaze pick up realistic reflections.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    this.scene.environment = this.envTex;
+    this.scene.environmentIntensity = 0.28;
     this.heartTex = this.tex(heartTexture());
 
     this.buildRoom();
@@ -166,9 +198,12 @@ export class CafeScene {
     this.ovenLight = bk.light;
     this.ovenDoneLamp = bk.doneLamp;
     this.tillDrawer = this.buildTill();
+    this.buildFrontOfHouse();
 
-    this.scene.add(this.customerAnchor, this.banditAnchor, this.avatarAnchor);
-    this.customerAnchor.position.set(2.25, 0, 1.0);
+    this.scene.add(this.customerAnchor, this.banditAnchor, this.camera);
+    this.camera.add(this.hands);
+    this.customerAnchor.position.set(-0.3, 0, 0.95);
+    this.customerAnchor.userData.pick = "customer";
     this.bandit = buildCat(BANDIT_COAT, 99);
     this.bandit.group.scale.setScalar(0.62);
     const sack = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 10), new THREE.MeshStandardMaterial({ color: "#b89a6a", roughness: 1 }));
@@ -177,12 +212,18 @@ export class CafeScene {
     this.banditAnchor.add(this.bandit.group);
     this.banditAnchor.position.set(-4.5, 0, 0.9);
     this.banditAnchor.visible = false;
-    this.avatarAnchor.position.set(-0.15, 0, -0.85);
+    this.pickables = [this.blenderBase, this.jar, this.cupGroup, this.coffeeGroup, this.donutGroup, this.bakeryGroup, this.tillGroup, this.customerAnchor];
+    const el = this.renderer.domElement;
+    el.style.touchAction = "none";
+    el.addEventListener("pointerdown", this.onPointerDown);
+    el.addEventListener("pointermove", this.onPointerMove);
+    el.addEventListener("pointerup", this.onPointerUp);
+    el.addEventListener("pointercancel", this.onPointerCancel);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
-    this.camera.position.copy(this.camPos);
+    this.camera.position.set(-1.0, 1.62, -1.0);
     this.loop();
   }
 
@@ -199,7 +240,9 @@ export class CafeScene {
     const key = new THREE.DirectionalLight("#ffdcb0", 2.2);
     key.position.set(2.5, 6, 4.5);
     key.castShadow = true;
-    key.shadow.mapSize.set(1024, 1024);
+    const big = typeof navigator !== "undefined" && navigator.maxTouchPoints <= 1;
+    key.shadow.mapSize.set(big ? 2048 : 1024, big ? 2048 : 1024);
+    key.shadow.radius = 3;
     key.shadow.camera.left = -4;
     key.shadow.camera.right = 4;
     key.shadow.camera.top = 4;
@@ -356,7 +399,9 @@ export class CafeScene {
     base.add(body);
     const onLight = new THREE.MeshStandardMaterial({ color: "#3b4a3a", emissive: "#5cd65c", emissiveIntensity: 0 });
     const btn = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 8), onLight);
-    btn.position.set(0, 0.11, 0.19);
+    btn.position.set(0, 0.11, -0.19);
+    base.userData.pick = "blender";
+    this.jar.userData.pick = "blender";
     base.add(btn);
     const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.04, 24), new THREE.MeshStandardMaterial({ color: "#3b3534", roughness: 0.4 }));
     collar.position.y = 0.24;
@@ -427,8 +472,9 @@ export class CafeScene {
   }
 
   private buildCup() {
-    const g = new THREE.Group();
-    g.position.set(X.cup, TOP, 0.05);
+    const g = this.cupGroup;
+    g.userData.pick = "blender";
+    g.position.set(X.cup, TOP, -0.05);
     this.scene.add(g);
     const glass = new THREE.MeshPhysicalMaterial({ color: "#ffffff", roughness: 0.08, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false });
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.075, 0.26, 28, 1, true), glass);
@@ -460,7 +506,9 @@ export class CafeScene {
 
   private buildCoffee() {
     const g = this.coffeeGroup;
-    g.position.set(X.coffee, TOP, -0.15);
+    g.userData.pick = "coffee";
+    g.position.set(X.coffee, TOP, -0.12);
+    g.rotation.y = Math.PI; // espresso machine faces the barista
     this.scene.add(g);
     const metal = new THREE.MeshStandardMaterial({ color: "#c9c3b6", metalness: 0.6, roughness: 0.3 });
     const dark = new THREE.MeshStandardMaterial({ color: "#3b3534", roughness: 0.5 });
@@ -543,6 +591,7 @@ export class CafeScene {
   /** Fryer on the back counter plus a serving plate on the front counter. */
   private buildDonutFryer() {
     const g = this.donutGroup;
+    g.userData.pick = "donut";
     this.scene.add(g);
     const steel = new THREE.MeshStandardMaterial({ color: "#c9c3b6", metalness: 0.7, roughness: 0.3 });
     const fryer = new THREE.Group();
@@ -603,7 +652,7 @@ export class CafeScene {
       this.topping.add(sp);
     }
     this.plateDonut.add(this.topping);
-    this.plateDonut.position.set(X.plate, TOP, 0.3);
+    this.plateDonut.position.set(X.fryer + 0.48, 1.045, -1.45);
     this.plateDonut.visible = false;
     g.add(this.plateDonut);
   }
@@ -631,6 +680,7 @@ export class CafeScene {
 
   private buildBakery() {
     const g = this.bakeryGroup;
+    g.userData.pick = "bakery";
     this.scene.add(g);
     // Mixing bowl (lathe profile)
     const pts = [];
@@ -744,8 +794,10 @@ export class CafeScene {
   }
 
   private buildTill() {
-    const g = new THREE.Group();
+    const g = this.tillGroup;
+    g.userData.pick = "till";
     g.position.set(X.till, TOP, -0.05);
+    g.rotation.y = Math.PI; // cashier side faces the barista
     this.scene.add(g);
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.22, 0.38), new THREE.MeshStandardMaterial({ color: "#f3c4cf", roughness: 0.5 }));
     body.position.y = 0.15;
@@ -776,6 +828,287 @@ export class CafeScene {
     return drawer;
   }
 
+  /** Tables, chairs, windows, door and ceiling on the customer side of the counter. */
+  private buildFrontOfHouse() {
+    const s = this.scene;
+    const wallTex = this.tex(wallTexture());
+    const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.95 });
+    for (const x of [-4.2, 4.2]) {
+      const side = new THREE.Mesh(new THREE.PlaneGeometry(9, 4), wallMat);
+      side.position.set(x, 2, 2.4);
+      side.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
+      side.receiveShadow = true;
+      s.add(side);
+    }
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(8.4, 4), wallMat);
+    front.position.set(0, 2, 5.6);
+    front.rotation.y = Math.PI;
+    s.add(front);
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(8.4, 8), new THREE.MeshStandardMaterial({ color: "#efe4d2", roughness: 1 }));
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.set(0, 3.6, 1.8);
+    s.add(ceiling);
+    // ceiling beams
+    const beamMat = new THREE.MeshStandardMaterial({ color: "#7b4e30", roughness: 0.8 });
+    for (let i = 0; i < 4; i++) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.14, 0.18), beamMat);
+      beam.position.set(0, 3.53, -1.2 + i * 2.1);
+      s.add(beam);
+    }
+    // Shop-front windows with evening street glow, and a door
+    const glowMat = new THREE.MeshBasicMaterial({ color: "#f6c98d" });
+    const frameMat = new THREE.MeshStandardMaterial({ color: "#f4ece0", roughness: 0.6 });
+    for (const x of [-2.3, 2.3]) {
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.6), glowMat);
+      glow.position.set(x, 1.9, 5.58);
+      glow.rotation.y = Math.PI;
+      s.add(glow);
+      for (const [w, h, dx, dy] of [[2.3, 0.08, 0, 0.82], [2.3, 0.08, 0, -0.82], [0.08, 1.7, -1.12, 0], [0.08, 1.7, 1.12, 0], [0.06, 1.6, 0, 0], [2.2, 0.06, 0, 0.25]]) {
+        const f = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), frameMat);
+        f.position.set(x + dx, 1.9 + dy, 5.55);
+        s.add(f);
+      }
+      // pink awning valance inside
+      const val = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.22, 0.08), new THREE.MeshStandardMaterial({ color: "#e8728f", roughness: 0.8 }));
+      val.position.set(x, 2.84, 5.5);
+      s.add(val);
+    }
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.3, 0.08), new THREE.MeshStandardMaterial({ color: "#7f9f7a", roughness: 0.6 }));
+    door.position.set(0, 1.15, 5.55);
+    s.add(door);
+    const doorGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.9), glowMat);
+    doorGlass.position.set(0, 1.6, 5.5);
+    doorGlass.rotation.y = Math.PI;
+    s.add(doorGlass);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), new THREE.MeshStandardMaterial({ color: "#d9b45a", metalness: 0.9, roughness: 0.25 }));
+    knob.position.set(-0.4, 1.1, 5.49);
+    s.add(knob);
+    // warm fill for the seating area (one directional light instead of several point lights)
+    const fill = new THREE.DirectionalLight("#ffd29a", 0.9);
+    fill.position.set(0, 3, -1);
+    fill.target.position.set(0, 0, 4);
+    s.add(fill, fill.target);
+
+    // Rug
+    const rug = new THREE.Mesh(new THREE.CircleGeometry(1.6, 40), new THREE.MeshStandardMaterial({ color: "#d98a9e", roughness: 1 }));
+    rug.rotation.x = -Math.PI / 2;
+    rug.position.set(0.2, 0.005, 3.2);
+    rug.scale.set(1.4, 1, 1);
+    rug.receiveShadow = true;
+    s.add(rug);
+
+    // Café tables and chairs
+    const wood = new THREE.MeshPhysicalMaterial({ color: "#a8703f", roughness: 0.45, clearcoat: 0.4, clearcoatRoughness: 0.4 });
+    const dark = new THREE.MeshStandardMaterial({ color: "#3b2a22", roughness: 0.5, metalness: 0.3 });
+    const cushion = new THREE.MeshStandardMaterial({ color: "#9fb89a", roughness: 0.9 });
+    const tables = [
+      { x: -2.15, z: 3.15 },
+      { x: 0.35, z: 3.7 },
+      { x: 2.55, z: 3.0 },
+    ];
+    for (const t of tables) {
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.05, 32), wood);
+      top.position.set(t.x, 0.76, t.z);
+      top.castShadow = top.receiveShadow = true;
+      s.add(top);
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.74, 12), dark);
+      leg.position.set(t.x, 0.37, t.z);
+      s.add(leg);
+      const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.28, 0.03, 20), dark);
+      foot.position.set(t.x, 0.015, t.z);
+      s.add(foot);
+      // a little vase with a flower and a mug on each table
+      const vase = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.14, 12), new THREE.MeshPhysicalMaterial({ color: "#ffffff", roughness: 0.05, transparent: true, opacity: 0.4 }));
+      vase.position.set(t.x + 0.12, 0.86, t.z);
+      s.add(vase);
+      const bloom = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshStandardMaterial({ color: "#e8728f", roughness: 0.7 }));
+      bloom.position.set(t.x + 0.12, 1.0, t.z);
+      s.add(bloom);
+      for (const a of [Math.PI * 0.85, -Math.PI * 0.15]) {
+        const cx = t.x + Math.sin(a) * 0.72;
+        const cz = t.z + Math.cos(a) * 0.72;
+        const chair = new THREE.Group();
+        chair.position.set(cx, 0, cz);
+        chair.rotation.y = a + Math.PI;
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.06, 0.42), wood);
+        seat.position.y = 0.47;
+        seat.castShadow = true;
+        const pad = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.38), cushion);
+        pad.position.y = 0.52;
+        const back = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.45, 0.05), wood);
+        back.position.set(0, 0.72, -0.2);
+        back.castShadow = true;
+        chair.add(seat, pad, back);
+        for (const [lx, lz] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) {
+          const l = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.46, 8), wood);
+          l.position.set(lx, 0.23, lz);
+          chair.add(l);
+        }
+        s.add(chair);
+      }
+      const shade = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.18, 20, 1, true), new THREE.MeshStandardMaterial({ color: "#e8728f", side: THREE.DoubleSide, roughness: 0.6 }));
+      shade.position.set(t.x, 2.75, t.z);
+      s.add(shade);
+      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.8), dark);
+      cord.position.set(t.x, 3.2, t.z);
+      s.add(cord);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshStandardMaterial({ color: "#fff1d0", emissive: "#ffcf87", emissiveIntensity: 2 }));
+      bulb.position.set(t.x, 2.65, t.z);
+      s.add(bulb);
+    }
+    // Tall potted plants in the corners
+    const leafMat = new THREE.MeshStandardMaterial({ color: "#5f8a55", roughness: 0.8 });
+    for (const [x, z] of [[-3.8, 5.1], [3.8, 5.1], [-3.8, 0.9]]) {
+      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.18, 0.45, 16), new THREE.MeshStandardMaterial({ color: "#d9825b", roughness: 0.8 }));
+      pot.position.set(x, 0.225, z);
+      pot.castShadow = true;
+      s.add(pot);
+      for (let i = 0; i < 9; i++) {
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), leafMat);
+        leaf.position.set(x + Math.cos(i * 2.4) * 0.18, 0.7 + (i % 4) * 0.22, z + Math.sin(i * 2.4) * 0.18);
+        leaf.scale.set(0.6, 1.7, 0.5);
+        leaf.rotation.z = Math.cos(i * 2.4) * 0.6;
+        leaf.castShadow = true;
+        s.add(leaf);
+      }
+    }
+  }
+
+  /** Where the barista stands and looks for the current station. */
+  private viewRig(v: SceneView) {
+    const s = v.state;
+    const P = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    if (s.robber.active) return { pos: P(-1.7, 1.62, -0.95), look: P(-2.5, 1.0, 0.7) };
+    switch (v.focus) {
+      case "blender":
+        this.lastFrontX = -1.0;
+        return { pos: P(-1.05, 1.75, -1.42), look: P(-1.05, 1.0, 0.6) };
+      case "coffee":
+        this.lastFrontX = 0.2;
+        return { pos: P(0.2, 1.75, -1.38), look: P(0.2, 1.0, 0.55) };
+      case "donut":
+        // turn around to the fryer on the back counter
+        return { pos: P(-0.25, 1.62, -0.55), look: P(-0.25, 1.05, -1.55) };
+      case "bakery": {
+        const k = s.bakery;
+        if (k.oven !== "idle" || (k.tray === "dough" && k.bowlPhase === "idle" && k.bowl.length === 0)) return { pos: P(1.5, 1.62, -0.6), look: P(1.5, 1.2, -1.6) };
+        this.lastFrontX = 1.25;
+        return { pos: P(1.25, 1.75, -1.38), look: P(1.25, 1.0, 0.55) };
+      }
+    }
+  }
+
+  private buildHands(a: Avatar) {
+    for (const g of this.handParts) {
+      this.hands.remove(g);
+      disposeObject(g);
+    }
+    this.handParts = [];
+    const mat = (color: string, r = 0.6) => new THREE.MeshStandardMaterial({ color, roughness: r, depthTest: false });
+    const skin = mat(a.skin, 0.55);
+    for (const side of [-1, 1]) {
+      // Built pointing along -Z (away from the camera), palm down.
+      const g = new THREE.Group();
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.046, 0.22, 14), mat("#f6efe3", 0.8));
+      sleeve.rotation.x = Math.PI / 2;
+      sleeve.position.z = 0.15;
+      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.03, 14), mat(a.apron, 0.7));
+      cuff.rotation.x = Math.PI / 2;
+      cuff.position.z = 0.04;
+      const palm = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), skin);
+      palm.scale.set(0.042, 0.018, 0.05);
+      palm.position.z = -0.03;
+      const parts: THREE.Mesh[] = [sleeve, cuff, palm];
+      for (let f = 0; f < 4; f++) {
+        const finger = new THREE.Mesh(new THREE.CapsuleGeometry(0.0085, 0.035 - Math.abs(f - 1.5) * 0.004, 3, 8), skin);
+        finger.rotation.x = Math.PI / 2 + 0.25;
+        finger.position.set((f - 1.5) * 0.019, -0.006, -0.085);
+        parts.push(finger);
+      }
+      const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.01, 0.03, 3, 8), skin);
+      thumb.position.set(side * 0.042, -0.004, -0.04);
+      thumb.rotation.set(Math.PI / 2, 0, side * 0.9);
+      parts.push(thumb);
+      parts.forEach((m, i) => {
+        m.renderOrder = 20 + i;
+        g.add(m);
+      });
+      g.userData.side = side;
+      this.hands.add(g);
+      this.handParts.push(g);
+    }
+  }
+
+  private updateHands(t: number, s: GameState, motion: number) {
+    const halfH = Math.tan((this.camera.fov * Math.PI) / 360) * 0.5;
+    const halfW = halfH * this.aspect;
+    const busy = s.blender.phase === "blending" || s.blender.phase === "pouring" || s.coffee.phase === "brewing" || s.donut.phase === "frying" || s.bakery.bowlPhase === "whisking";
+    const scale = 0.6 * Math.min(1, Math.max(0.7, this.aspect));
+    for (const g of this.handParts) {
+      const side = g.userData.side as number;
+      const work = busy ? Math.sin(t * 9 + side) * 0.02 * motion : Math.sin(t * 1.3 + side) * 0.004 * motion;
+      g.scale.setScalar(scale);
+      // resting on the counter edge, just above the on-screen buttons
+      const lift = Math.min(0.5, ((this.view?.insetBottom ?? 0) / Math.max(1, this.container.clientHeight)) * 2);
+      g.position.set(side * halfW * 0.4, -halfH * ((this.aspect < 1 ? 0.5 : 0.78) - lift * 0.9) + work, -0.5);
+      g.rotation.set(-0.75, side * 0.3, side * -0.1);
+    }
+  }
+
+  private onPointerDown = (e: PointerEvent) => {
+    this.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, drag: false };
+  };
+
+  private onPointerMove = (e: PointerEvent) => {
+    const p = this.pointer;
+    if (p && p.id === e.pointerId) {
+      if (!p.drag && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) {
+        p.drag = true;
+        try {
+          this.renderer.domElement.setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (p.drag) {
+        // drag to look around (like turning your head)
+        this.yaw = Math.max(-Math.PI, Math.min(Math.PI, this.yaw - (e.clientX - p.lastX) * 0.005));
+        this.pitch = Math.max(-0.6, Math.min(0.6, this.pitch + (e.clientY - p.lastY) * 0.004));
+        p.lastX = e.clientX;
+        p.lastY = e.clientY;
+      }
+      return;
+    }
+    if (e.pointerType === "mouse") this.renderer.domElement.style.cursor = this.pickAt(e) ? "pointer" : "grab";
+  };
+
+  private onPointerUp = (e: PointerEvent) => {
+    const p = this.pointer;
+    this.pointer = null;
+    if (!p || p.drag) return;
+    const target = this.pickAt(e);
+    if (target) this.onPick(target);
+  };
+
+  private onPointerCancel = () => {
+    this.pointer = null;
+  };
+
+  private pickAt(e: PointerEvent): PickTarget | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hits = this.raycaster.intersectObjects(this.pickables.filter((o) => o.visible), true);
+    for (const h of hits) {
+      let o: THREE.Object3D | null = h.object;
+      while (o) {
+        if (o.userData.pick) return o.userData.pick as PickTarget;
+        o = o.parent;
+      }
+    }
+    return null;
+  }
+
   // ---------------------------------------------------------------- updates
 
   setView(view: SceneView) {
@@ -795,7 +1128,7 @@ export class CafeScene {
         const rig = buildCat(CUSTOMERS[cid].coat, cid.length * 31 + cid.charCodeAt(0));
         rig.group.scale.setScalar(0.66);
         rig.group.position.y = 0.96;
-        rig.group.rotation.y = -0.75;
+        rig.group.rotation.y = Math.PI;
         this.customerAnchor.add(rig.group);
         this.customer = { id: cid, rig };
       }
@@ -821,16 +1154,40 @@ export class CafeScene {
       }
     });
 
-    // Avatar
+    // First-person hands in the barista's colours
     const key = JSON.stringify(s.avatar);
-    if (key !== this.avatarKey) {
-      this.avatarKey = key;
-      if (this.avatarRig) {
-        this.avatarAnchor.remove(this.avatarRig.group);
-        this.avatarRig.dispose();
+    if (key !== this.handsKey) {
+      this.handsKey = key;
+      this.buildHands(s.avatar as Avatar);
+    }
+
+    // A couple of other regulars relaxing at the café tables
+    const others = unlockedCustomers(s).filter((id) => id !== cid).slice(0, this.ambientSeats.length);
+    const akey = others.join(",");
+    if (akey !== this.ambient.key) {
+      for (const r of this.ambient.rigs) {
+        this.scene.remove(r.group);
+        r.dispose();
       }
-      this.avatarRig = buildAvatar(s.avatar as Avatar);
-      this.avatarAnchor.add(this.avatarRig.group);
+      this.ambient = {
+        key: akey,
+        rigs: others.map((id, i) => {
+          const rig = buildCat(CUSTOMERS[id].coat, id.length * 31 + id.charCodeAt(0));
+          const seat = this.ambientSeats[i];
+          rig.group.scale.setScalar(0.5);
+          rig.group.position.set(seat.x, 0.5, seat.z);
+          rig.group.rotation.y = Math.PI + seat.ry;
+          this.scene.add(rig.group);
+          return rig;
+        }),
+      };
+    }
+
+    if (view.focus !== this.lastFocus) {
+      // Re-centre the view when the player switches station.
+      this.lastFocus = view.focus;
+      this.yaw = 0;
+      this.pitch = 0;
     }
 
     // Blender pieces
@@ -876,7 +1233,7 @@ export class CafeScene {
   private resize() {
     const w = Math.max(1, this.container.clientWidth);
     const h = Math.max(1, this.container.clientHeight);
-    this.renderer.setPixelRatio(pickPixelRatio());
+    this.renderer.setPixelRatio(pickPixelRatio() * this.quality);
     this.renderer.setSize(w, h, false);
     this.aspect = w / h;
     this.camera.aspect = this.aspect;
@@ -884,6 +1241,20 @@ export class CafeScene {
   }
 
   private lastFrame = 0;
+  private slowTime = 0;
+  private quality = 1; // multiplier on the device pixel-ratio cap
+
+  /** Drop resolution (and finally shadows) when frames are consistently slow. */
+  private adaptQuality(frameMs: number) {
+    if (frameMs > 45) this.slowTime += frameMs;
+    else this.slowTime = Math.max(0, this.slowTime - frameMs * 0.5);
+    if (this.slowTime > 1200 && this.quality > 0.5) {
+      this.slowTime = 0;
+      this.quality = Math.max(0.5, this.quality - 0.2);
+      this.renderer.setPixelRatio(pickPixelRatio() * this.quality);
+      if (this.quality <= 0.5) this.renderer.shadowMap.enabled = false;
+    }
+  }
 
   /** True while a station animation is running and deserves full frame rate. */
   private busy() {
@@ -904,6 +1275,7 @@ export class CafeScene {
     if (typeof document !== "undefined" && document.hidden) return;
     // Idle scenes (breathing cats, swaying tails) render at ~30 fps to save battery.
     if (!this.busy() && ts - this.lastFrame < 31) return;
+    if (this.lastFrame) this.adaptQuality(ts - this.lastFrame);
     this.lastFrame = ts;
     this.timer.update();
     const dt = Math.min(0.05, this.timer.getDelta());
@@ -919,28 +1291,47 @@ export class CafeScene {
     const now = Date.now();
     const motion = v.reducedMotion ? 0.25 : 1;
 
-    // Camera framing: wide view in landscape, follow the active station in portrait
-    const wide = this.aspect >= 1.35;
-    const focusX = v.focus === "blender" ? -1.0 : v.focus === "coffee" ? 0.35 : v.focus === "donut" ? 0.1 : 1.25;
-    const width = wide ? 5.6 : 3.1;
-    const tx = wide ? 0 : focusX + 0.35;
-    const vfov = (this.camera.fov * Math.PI) / 180;
-    const dist = Math.min(11, Math.max(3.2, width / 2 / (Math.tan(vfov / 2) * this.aspect)));
-    this.camTarget.set(tx, 1.05, 0.15);
-    this.camPos.set(tx, 1.05 + dist * 0.72, dist * 0.86 + 0.15);
-    const k = v.reducedMotion ? 1 : Math.min(1, dt * 3);
+    // First-person camera: standing behind the counter at eye height.
+    const wide = this.aspect >= 1.2;
+    const rig = this.viewRig(v);
+    const hfov = 74;
+    const vfov = Math.min(88, Math.max(50, (2 * Math.atan(Math.tan(((hfov / 2) * Math.PI) / 180) / this.aspect) * 180) / Math.PI));
+    if (Math.abs(this.camera.fov - vfov) > 0.1) {
+      this.camera.fov = vfov;
+      this.camera.updateProjectionMatrix();
+    }
+    const k = v.reducedMotion ? 1 : Math.min(1, dt * 3.2);
+    this.camPos.copy(rig.pos);
+    this.camPos.y += Math.sin(t * 1.3) * 0.006 * motion; // gentle breathing
     this.camera.position.lerp(this.camPos, k);
+    // apply the player's look-around offset
+    const dir = this.tmpA.copy(rig.look).sub(rig.pos);
+    const len = dir.length();
+    const baseYaw = Math.atan2(dir.x, dir.z);
+    const basePitch = Math.asin(dir.y / len);
+    const yaw = baseYaw + this.yaw;
+    const pitch = Math.max(-1.2, Math.min(0.9, basePitch + this.pitch));
+    this.camTarget.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(len).add(rig.pos);
     this.lookAt.lerp(this.camTarget, k);
     this.camera.lookAt(this.lookAt);
+    this.updateHands(t, s, motion);
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const ox = Math.round((v.insetRight ?? 0) / 2);
+    const oy = Math.round(Math.min(h * 0.4, v.insetBottom ?? 0) / 2);
+    if (ox || oy) this.camera.setViewOffset(w, h, ox, oy, w, h);
+    else if (this.camera.view) this.camera.clearViewOffset();
 
-    // Customer follows to the active station on narrow screens
-    const custX = wide ? 2.25 : focusX + 1.25;
-    this.customerAnchor.position.x += (custX - this.customerAnchor.position.x) * (v.reducedMotion ? 1 : Math.min(1, dt * 3));
-    this.customerAnchor.position.z = wide ? 1.0 : 0.95;
+    // The customer sits across the counter, near whatever front station you're using.
+    const custX = this.lastFrontX + (wide ? 0.85 : 0.5);
+    this.customerAnchor.position.x += (custX - this.customerAnchor.position.x) * (v.reducedMotion ? 1 : Math.min(1, dt * 2.5));
+    this.customerAnchor.position.z = 0.95;
     if (this.customer) {
-      this.customer.rig.group.rotation.y = wide ? -0.75 : -0.55;
+      const toCam = Math.atan2(this.camera.position.x - this.customerAnchor.position.x, this.camera.position.z - this.customerAnchor.position.z);
+      this.customer.rig.group.rotation.y = toCam;
       this.customer.rig.update(t, dt, v.happy ? "happy" : "idle", motion);
     }
+    this.ambient.rigs.forEach((r, i) => r.update(t + i * 2.3, dt, "idle", motion * 0.7));
 
     // Hearts when the customer is served
     if (v.happy && !this.lastHappy && this.customer) this.burstHearts();
@@ -954,12 +1345,6 @@ export class CafeScene {
       if (h.life <= 0) h.s.visible = false;
     }
 
-    // Avatar walks to the active station
-    // Stand just beside the active station so the barista never hides the jar.
-    const avX = v.focus === "blender" ? -0.15 : v.focus === "coffee" ? -0.45 : v.focus === "donut" ? 0.35 : 0.55;
-    this.avatarAnchor.position.x += (avX - this.avatarAnchor.position.x) * Math.min(1, dt * 2.5);
-    const busy = s.blender.phase === "blending" || s.coffee.phase === "brewing" || s.donut.phase === "frying" || s.bakery.bowlPhase === "whisking";
-    this.avatarRig?.update(t, dt, busy, motion);
     let i = 0;
     for (const rig of this.staffRigs.values()) rig.update(t + i++ * 1.7, dt, "working", motion);
 
@@ -969,7 +1354,7 @@ export class CafeScene {
     const bx = robber ? -2.75 : -4.8;
     this.banditAnchor.position.x += (bx - this.banditAnchor.position.x) * Math.min(1, dt * (robber ? 1.5 : 2.5));
     if (!robber && this.banditAnchor.position.x < -4.5) this.banditAnchor.visible = false;
-    this.banditAnchor.rotation.y = robber ? 0.6 : -1.2;
+    this.banditAnchor.rotation.y = robber ? Math.PI - 0.5 : -1.2;
     if (this.banditAnchor.visible) this.bandit.update(t, dt, "sneaky", motion);
     this.tillDrawer.position.z = robber ? 0.12 + Math.sin(t * 3) * 0.02 * motion : 0;
     this.padlock.visible = !robber && s.robber.stopped > 0 && this.banditAnchor.visible;
@@ -1164,7 +1549,13 @@ export class CafeScene {
     this.resizeObserver.disconnect();
     this.customer?.rig.dispose();
     this.bandit.dispose();
-    this.avatarRig?.dispose();
+    for (const r of this.ambient.rigs) r.dispose();
+    const el = this.renderer.domElement;
+    el.removeEventListener("pointerdown", this.onPointerDown);
+    el.removeEventListener("pointermove", this.onPointerMove);
+    el.removeEventListener("pointerup", this.onPointerUp);
+    el.removeEventListener("pointercancel", this.onPointerCancel);
+    this.envTex?.dispose();
     for (const r of this.staffRigs.values()) r.dispose();
     disposeObject(this.scene);
     for (const t of this.textures) t.dispose();

@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CUSTOMERS, RECIPES, type Station } from "@/lib/game/data";
 import {
   canRescue,
@@ -15,7 +15,7 @@ import {
   type GameState,
   type TutorialStep,
 } from "@/lib/game/engine";
-import type { SceneView } from "@/lib/scene/CafeScene";
+import type { PickTarget, SceneView } from "@/lib/scene/CafeScene";
 import { AvatarFace, CatFace } from "./CatFace";
 import { HelpModal, ManageModal, ShopModal, StatusBadge } from "./Modals";
 import { Scene3D } from "./Scene3D";
@@ -40,6 +40,35 @@ export default function Game() {
   const [shopOpen, setShopOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState<null | "staff" | "you" | "settings">(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [insets, setInsets] = useState({ bottom: 0, right: 0 });
+  const stackRef = useRef<HTMLDivElement>(null);
+
+  // Measure how much of the café the HUD and drawer cover, so the 3D view can re-centre.
+  useEffect(() => {
+    const el = stackRef.current;
+    if (!el) return;
+    const measure = () => {
+      const drawer = el.querySelector<HTMLElement>("#station-drawer");
+      const total = el.getBoundingClientRect().height;
+      const sideBySide = drawer ? drawer.getBoundingClientRect().width < el.getBoundingClientRect().width * 0.7 : false;
+      const dH = drawer && sideBySide ? drawer.getBoundingClientRect().height : 0;
+      const right = drawer && sideBySide ? drawer.getBoundingClientRect().width : 0;
+      setInsets((p) => {
+        const next = { bottom: Math.round(total - dH), right: Math.round(right) };
+        return p.bottom === next.bottom && p.right === next.right ? p : next;
+      });
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const mo = new MutationObserver(measure);
+    mo.observe(el, { childList: true, subtree: false });
+    measure();
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, []);
 
   const dispatch = useCallback(
     (a: Action) => {
@@ -57,36 +86,74 @@ export default function Game() {
   const tutorial = tutorialStep(state);
   const order = state.currentOrder;
   const happy = order?.status === "served";
-  const view: SceneView = useMemo(() => ({ state, focus, reducedMotion: reduce, happy }), [state, focus, reduce, happy]);
+  const view: SceneView = useMemo(() => ({ state, focus, reducedMotion: reduce, happy, insetBottom: insets.bottom, insetRight: insets.right }), [state, focus, reduce, happy, insets]);
   const lp = levelProgress(state.xp);
 
   const servable = !!order && order.status === "waiting" && (state.cup !== null || state.coffee.phase === "ready" || state.donut.phase === "decorated" || state.bakery.croissants > 0) && state.blender.phase !== "pouring";
   const rescue = canRescue(state);
+  const needsStation = tutorial === "inventory" || tutorial === "on" || tutorial === "pour";
+
+  // Tapping something in the 3D café: stations open their controls, the customer takes a ready order, the till locks.
+  const onPick = useCallback(
+    (target: PickTarget) => {
+      if (target === "till") {
+        if (state.robber.active) dispatch({ type: "secureTill" });
+        return;
+      }
+      if (target === "customer") {
+        if (servable && !state.robber.active) dispatch({ type: "serve", now: Date.now() });
+        else if (order && order.status === "waiting" && isStationUnlocked(state, RECIPES[order.recipeId].station)) {
+          setFocus(RECIPES[order.recipeId].station);
+          setDrawerOpen(true);
+        }
+        return;
+      }
+      if (isStationUnlocked(state, target)) {
+        setFocus(target);
+        setDrawerOpen(true);
+      }
+    },
+    [state, servable, order, dispatch],
+  );
 
   return (
     <div className="flex h-[100svh] flex-col overflow-hidden bg-[#fbf6ee] text-[#3b2a22]">
       <TopBar state={state} level={lp} onHelp={() => setHelpOpen(true)} onManage={(t) => setManageOpen(t)} dispatch={dispatch} />
 
-      <main className="flex min-h-0 flex-1 flex-col landscape:flex-row lg:flex-row">
-        {/* 3D café */}
-        <div className="relative h-[42svh] min-h-[220px] shrink-0 overflow-hidden bg-[#3a2a22] landscape:h-auto landscape:min-h-0 landscape:flex-1 lg:h-auto lg:flex-1" data-dropzone="scene">
-          <Scene3D view={view} />
-          {order && <OrderCard state={state} />}
+      <main className="relative min-h-0 flex-1 overflow-hidden bg-[#3a2a22]" data-dropzone="scene">
+        {/* First-person 3D café fills the screen; tap a station to open its controls. */}
+        <Scene3D view={view} onPick={onPick} />
+        {order && <OrderCard state={state} />}
+        {dragging && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-[#e8728f]/15 text-lg font-bold text-white">Drop to add</div>}
+
+        {/* Bottom stack: toasts, alerts, tutorial, the hidden-by-default station drawer, and the floating action buttons */}
+        <div className="pointer-events-none absolute inset-0 flex flex-col justify-end p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div ref={stackRef} className="flex flex-col gap-2">
+          <Toasts toasts={toasts} reduce={reduce} />
           {state.robber.active && (
-            <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="absolute inset-x-2 bottom-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#3b2a22]/90 p-3 text-white shadow-xl" role="alert">
+            <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="pointer-events-auto flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#3b2a22]/90 p-3 text-white shadow-xl" role="alert">
               <p className="text-sm font-semibold">🦝 A masked bandit is tiptoeing toward the till! Lock it up before you keep serving.</p>
               <button type="button" className={`${btnPrimary} min-h-11`} onClick={() => dispatch({ type: "secureTill" })}>
                 🔒 Secure the till
               </button>
             </motion.div>
           )}
-          {tutorial && (
-            <div className="absolute inset-x-2 bottom-2 flex items-center gap-2 rounded-2xl bg-[#3b2a22]/92 p-2.5 text-white shadow-lg" data-testid="tutorial" aria-live="polite">
+          {rescue && (
+            <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-2xl bg-[#fde8ee]/95 p-3 shadow-lg ring-1 ring-[#f0c6d1]">
+              <p className="text-sm">Short on coins for this order? The neighbours will chip in {order ? missingCost(state, order.recipeId) - state.coins : 0}.</p>
+              <button type="button" className={`${btnPrimary} min-h-11 text-sm`} onClick={() => dispatch({ type: "rescue" })}>
+                Tip jar
+              </button>
+            </div>
+          )}
+          {tutorial && !drawerOpen && (
+            <div className="pointer-events-auto flex items-center gap-2 rounded-2xl bg-[#3b2a22]/90 p-2.5 text-white shadow-lg" data-testid="tutorial" aria-live="polite">
               <span className="text-xl" aria-hidden>
                 🐾
               </span>
               <p className="flex-1 text-sm leading-snug">
                 <span className="mr-1 text-xs font-bold uppercase tracking-wide text-[#f7b6c8]">{TUTORIAL_TEXT[tutorial].step}:</span>
+                {needsStation && !drawerOpen ? "Tap the blender in front of you (or the 🧰 Station button). " : ""}
                 {TUTORIAL_TEXT[tutorial].text}
               </p>
               <button type="button" className="min-h-11 shrink-0 rounded-xl px-2 text-xs font-bold underline" onClick={() => dispatch({ type: "dismissTutorial" })}>
@@ -94,43 +161,69 @@ export default function Game() {
               </button>
             </div>
           )}
-          <Toasts toasts={toasts} reduce={reduce} />
-          {dragging && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-[#e8728f]/15 text-lg font-bold text-white">Drop to add</div>}
-        </div>
 
-        {/* Controls */}
-        <aside className="flex min-h-0 flex-1 flex-col border-[#eadccb] landscape:w-[min(430px,50vw)] landscape:flex-none landscape:border-l lg:w-[430px] lg:flex-none lg:border-l" aria-label="Café controls">
-          <div className="flex-1 overflow-y-auto overscroll-contain p-3">
-            <StationTabs state={state} focus={focus} setFocus={setFocus} />
-            <div className="mt-3" role="tabpanel" id={`panel-${focus}`} aria-labelledby={`tab-${focus}`}>
-              {focus === "blender" && <BlenderPanel state={state} dispatch={dispatch} tutorial={tutorial} dragging={dragging} onDragState={setDragging} />}
-              {focus === "donut" && <DonutPanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
-              {focus === "coffee" && <CoffeePanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
-              {focus === "bakery" && <BakeryPanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
-            </div>
-          </div>
+          <AnimatePresence>
+            {drawerOpen && (
+              <motion.section
+                key="drawer"
+                id="station-drawer"
+                aria-label="Café controls"
+                role="region"
+                initial={reduce ? { opacity: 0 } : { y: 40, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={reduce ? { opacity: 0 } : { y: 40, opacity: 0 }}
+                transition={{ type: "spring", damping: 28, stiffness: 320 }}
+                className="pointer-events-auto flex max-h-[52svh] w-full flex-col overflow-hidden rounded-3xl bg-[#fbf6ee]/97 shadow-2xl ring-1 ring-[#eadccb] backdrop-blur landscape:max-h-[calc(100svh-10rem)] landscape:w-[min(430px,55vw)] landscape:self-end lg:max-h-[calc(100svh-10rem)] lg:w-[430px] lg:self-end"
+              >
+                <div className="flex items-center gap-2 border-b border-[#eadccb] px-3 py-2">
+                  <div className="flex-1">
+                    <StationTabs state={state} focus={focus} setFocus={setFocus} />
+                  </div>
+                  <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white text-lg ring-1 ring-[#eadccb]" aria-label="Hide station controls" onClick={() => setDrawerOpen(false)}>
+                    ▾
+                  </button>
+                </div>
+                {tutorial && (
+                  <p className="border-b border-[#eadccb] bg-[#3b2a22] px-3 py-1.5 text-xs text-white" data-testid="tutorial" aria-live="polite">
+                    <span className="font-bold text-[#f7b6c8]">{TUTORIAL_TEXT[tutorial].step}:</span> {TUTORIAL_TEXT[tutorial].text}{" "}
+                    <button type="button" className="ml-1 underline" onClick={() => dispatch({ type: "dismissTutorial" })}>
+                      Skip tutorial
+                    </button>
+                  </p>
+                )}
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" role="tabpanel" id={`panel-${focus}`} aria-labelledby={`tab-${focus}`}>
+                  {focus === "blender" && <BlenderPanel state={state} dispatch={dispatch} tutorial={tutorial} dragging={dragging} onDragState={setDragging} />}
+                  {focus === "donut" && <DonutPanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
+                  {focus === "coffee" && <CoffeePanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
+                  {focus === "bakery" && <BakeryPanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
+                </div>
+              </motion.section>
+            )}
+          </AnimatePresence>
 
-          {rescue && (
-            <div className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-2xl bg-[#fde8ee] p-3 ring-1 ring-[#f0c6d1]">
-              <p className="text-sm">Short on coins for this order? The neighbours will chip in {order ? missingCost(state, order.recipeId) - state.coins : 0}.</p>
-              <button type="button" className={`${btnPrimary} min-h-11 text-sm`} onClick={() => dispatch({ type: "rescue" })}>
-                Tip jar
-              </button>
-            </div>
-          )}
-
-          <nav aria-label="Main actions" className="grid grid-cols-3 gap-2 border-t border-[#eadccb] bg-[#f6ede2] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <button type="button" className={`${btnGhost}${glow(tutorial === "shop")}`} data-tutorial="shop" onClick={() => setShopOpen(true)}>
+          <nav aria-label="Main actions" className="pointer-events-auto grid grid-cols-4 gap-2 self-center rounded-3xl bg-[#3b2a22]/55 p-2 shadow-xl backdrop-blur-sm sm:w-[34rem]">
+            <button type="button" className={`${btnGhost} px-2 text-sm${glow(tutorial === "shop")}`} data-tutorial="shop" onClick={() => setShopOpen(true)}>
               🛒 Shop
             </button>
-            <button type="button" className={`${btnPrimary}${glow(tutorial === "serve")}`} data-tutorial="serve" disabled={!servable || state.robber.active} onClick={() => dispatch({ type: "serve", now: Date.now() })}>
+            <button
+              type="button"
+              className={`${btnGhost} px-2 text-sm${glow(needsStation && !drawerOpen)}`}
+              aria-expanded={drawerOpen}
+              aria-controls="station-drawer"
+              aria-label={drawerOpen ? "Hide station controls" : "Open station controls"}
+              onClick={() => setDrawerOpen((o) => !o)}
+            >
+              🧰 Station
+            </button>
+            <button type="button" className={`${btnPrimary} px-2 text-sm${glow(tutorial === "serve")}`} data-tutorial="serve" disabled={!servable || state.robber.active} onClick={() => dispatch({ type: "serve", now: Date.now() })}>
               Serve
             </button>
-            <button type="button" className={`${btnSage} text-sm leading-tight`} disabled={!happy || state.robber.active} onClick={() => dispatch({ type: "nextCustomer", rand: [Math.random(), Math.random(), Math.random(), Math.random(), Math.random()] })}>
+            <button type="button" className={`${btnSage} px-1 text-xs leading-tight`} disabled={!happy || state.robber.active} onClick={() => dispatch({ type: "nextCustomer", rand: [Math.random(), Math.random(), Math.random(), Math.random(), Math.random()] })}>
               Welcome next customer
             </button>
           </nav>
-        </aside>
+          </div>
+        </div>
       </main>
 
             <p className="sr-only" role="status" aria-live="polite">
@@ -245,7 +338,7 @@ function StationTabs({ state, focus, setFocus }: { state: GameState; focus: Stat
 
 function Toasts({ toasts, reduce }: { toasts: Toast[]; reduce: boolean }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-20 z-30 flex flex-col items-center gap-2 px-3" aria-hidden="true">
+    <div className="pointer-events-none flex flex-col items-center gap-2" aria-hidden="true">
       <AnimatePresence>
         {toasts.map((t) => (
           <motion.div

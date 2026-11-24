@@ -38,3 +38,10 @@ export async function openShopAndBuy(page: Page, info: TestInfo, names: RegExp[]
 }
 
 export const coins = (page: Page) => page.getByTestId("coins");
+
+/** The station controls are hidden by default; open the drawer if it's closed. */
+export async function openStation(page: Page, info: TestInfo) {
+  const open = page.getByRole("button", { name: "Open station controls" });
+  if (await open.count()) await press(open, info);
+  await expect(page.getByRole("region", { name: "Café controls" })).toBeVisible();
+}

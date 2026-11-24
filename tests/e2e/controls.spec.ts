@@ -21,6 +21,9 @@ test.describe("desktop input", () => {
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
 
+    const station = page.getByRole("button", { name: "Open station controls" });
+    await station.focus();
+    await page.keyboard.press("Enter");
     await page.getByTestId("inv-strawberry").focus();
     await page.keyboard.press("Space");
     await expect(page.getByTestId("blender-status")).toContainText("Strawberry (1/4)");
@@ -43,6 +46,7 @@ test.describe("desktop input", () => {
     await page.getByRole("button", { name: /Shop/ }).click();
     await page.getByRole("button", { name: /Buy strawberry/ }).click();
     await page.getByRole("button", { name: "Back to the counter" }).click();
+    await page.getByRole("button", { name: "Open station controls" }).click();
     const chip = page.getByTestId("inv-strawberry");
     const zone = page.locator('[data-dropzone="blender"]');
     const a = (await chip.boundingBox())!;
@@ -70,6 +74,7 @@ test.describe("desktop input", () => {
     await expect(market.getByTestId("shop-item-strawberry")).toContainText("In your pantry: 3");
     await market.getByRole("button", { name: "Close the market" }).click();
     await expect(market).toBeHidden();
+    await page.getByRole("button", { name: "Open station controls" }).click();
     await expect(page.getByTestId("inv-strawberry")).toContainText("×3");
   });
 
@@ -110,6 +115,7 @@ test.describe("desktop input", () => {
     await page.getByRole("button", { name: /Shop/ }).click();
     await page.getByRole("button", { name: /Buy strawberry/ }).click();
     await page.getByRole("button", { name: "Back to the counter" }).click();
+    await page.getByRole("button", { name: "Open station controls" }).click();
     await page.getByTestId("inv-strawberry").click();
     await page.getByRole("button", { name: /ON/ }).click();
     await page.getByRole("button", { name: "Pour" }).click({ timeout: 10_000 });

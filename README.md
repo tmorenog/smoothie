@@ -49,12 +49,18 @@ The e2e config starts Chromium with SwiftShader (`--use-gl=angle --use-angle=swi
 
 ## How to play
 
+### First-person café
+
+You play from the barista's eyes, standing behind the counter. Your sleeves and hands are at the bottom of the view and customers sit on the stool across from you. Behind them are café tables, other regulars, windows and the front door. **Drag** (mouse or finger) to look around. Turn around to see the back counter with the donut fryer, oven and your staff. The view turns there automatically when you use those stations.
+
+The station menu is **hidden** so the café fills the screen. **Tap a station in the café** (blender, cup, coffee machine, fryer, mixing bowl or oven) to slide its controls up, or press **🧰 Station** (keyboard: Tab to it, then Enter). Press **▾** to hide them again. Tapping the customer serves a ready order, and tapping the till locks it when a bandit is around. Only Shop, Station, Serve and Welcome next customer stay on screen as floating buttons.
+
 ### Your first order (the tutorial walks you through it)
 
 You start with exactly **5 Smoothie Coins** and an empty inventory. **Mochi** (a tuxedo cat) orders a **Strawberry Smoothie**.
 
 1. **Shop:** press **🛒 Shop** (it glows). The market only appears when you press Shop. **Whiskers' Market** opens: a striped-awning stall run by a tabby shopkeeper, with produce in wooden crates on shelves, hanging price tags, your wallet and a receipt. Press **Buy · 5🪙** under the strawberries. You now have 0 coins and 1 strawberry. Use **−/+** to buy up to 9 at once. Items you haven't unlocked yet sit in their crates marked "Arriving at level N".
-2. **Inventory:** under *Your inventory: fruit*, **tap the strawberry** to drop it into the blender. You can also **drag** it onto the blender box or the 3D café, or focus it and press **Enter/Space**.
+2. **Inventory:** tap the blender in front of you (or **🧰 Station**). Under *Your inventory: fruit*, **tap the strawberry** to drop it into the blender. You can also **drag** it onto the blender box or the 3D café, or focus it and press **Enter/Space**.
 3. **ON:** press **⏻ ON**. The blender jiggles, the blades spin, and the strawberry pieces swirl and turn into a **light pink** smoothie.
 4. **Pour:** press **Pour**. The jar tilts and a stream fills the cup on the counter.
 5. **Serve:** press **Serve**. Mochi purrs, hearts float up, and you're paid **12 coins**.
@@ -121,7 +127,7 @@ Baking ingredients live in a separate *pantry* and only go into the mixing bowl.
 
   Hired staff appear as aproned cats on the back counter.
 - **Menu specials:** name a special (e.g. "Pink Purrfection") and assign any recipe you've unlocked. Up to 4 specials. Customers order specials by name about 40% of the time, and a special pays a +3 coin bonus.
-- **Your barista:** choose girl or boy, then set the name, apron color, skin tone and hair color. You appear behind the counter and in the top bar.
+- **Your barista:** choose girl or boy, then set the name, apron color, skin tone and hair color. You appear in the top bar, and your sleeves (apron-colour cuffs) and hands are in the first-person view.
 - **Regulars:** visit counts for every customer. **Regular** status comes at 3 visits (+1 tip). **⭐ VIP** comes at 5 visits (+25% tip, minimum 3 coins).
 - **Settings:** sound toggle, and **Reset café…**, which asks for confirmation before erasing everything.
 
@@ -157,7 +163,8 @@ lib/game/
   data.ts            Ingredients, recipes, customers, staff, durations
   engine.ts          Pure reducer (applyAction), levels, mixing, orders, tutorial
   persistence.ts     Validated localStorage save/load (timers fast-forward on load)
-lib/scene/           Imperative Three.js: café room, blender, cup, donut fryer, coffee, oven, cats, avatar
+lib/scene/           Imperative Three.js: first-person camera and hands, café room and seating,
+                     blender, cup, donut fryer, coffee, oven, cats, tap-to-pick and drag-to-look
 lib/sound.ts         Synthesized Web Audio effects (no audio files)
 tests/unit/          Vitest engine tests
 tests/e2e/           Playwright browser tests
@@ -166,6 +173,7 @@ tests/e2e/           Playwright browser tests
 - **Accessibility:** all controls are HTML buttons with labels. You can play with the keyboard, using Tab, Enter/Space and Esc to close dialogs, and dialogs trap focus. Drag and drop is optional because tapping does the same thing. Messages are announced through a polite live region. The 3D canvas is decorative (`aria-hidden`), and the order card carries the information.
 - **Reduced motion:** honours `prefers-reduced-motion`, which calms the camera, jiggle and tails, uses fade-only dialogs and stops the CSS pulses.
 - **No WebGL?** The game automatically shows an illustrated 2D counter and stays fully playable. Force it with `/?nowebgl`.
+- **Realism:** image-based lighting (Three.js `RoomEnvironment`) gives the glass, metal and glaze soft reflections. ACES tone mapping, warm pendant and window lights, and 2048-px shadows on desktop.
 - **Performance:** pixel ratio is capped at 1.25 on tablets, 1.75 on phones and 2 on desktop. The scene renders at full rate only while something animates (about 30 fps when idle), and pauses in background tabs. Customer and staff cats, the avatar, textures and the renderer are disposed when they're replaced or the scene unmounts.
 
 ---
