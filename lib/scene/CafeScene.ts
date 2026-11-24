@@ -1162,7 +1162,11 @@ export class CafeScene {
     }
 
     // A couple of other regulars relaxing at the café tables
-    const others = unlockedCustomers(s).filter((id) => id !== cid).slice(0, this.ambientSeats.length);
+    // Keep the same regulars seated unless one of them just walked up to the counter.
+    const unlocked = unlockedCustomers(s);
+    const current = this.ambient.key ? this.ambient.key.split(",") : [];
+    const keep = current.length > 0 && !current.includes(cid ?? "") && current.every((id) => unlocked.includes(id as never));
+    const others = keep ? current : unlocked.filter((id) => id !== cid).slice(0, this.ambientSeats.length);
     const akey = others.join(",");
     if (akey !== this.ambient.key) {
       for (const r of this.ambient.rigs) {
@@ -1172,7 +1176,7 @@ export class CafeScene {
       this.ambient = {
         key: akey,
         rigs: others.map((id, i) => {
-          const rig = buildCat(CUSTOMERS[id].coat, id.length * 31 + id.charCodeAt(0));
+          const rig = buildCat(CUSTOMERS[id as keyof typeof CUSTOMERS].coat, id.length * 31 + id.charCodeAt(0));
           const seat = this.ambientSeats[i];
           rig.group.scale.setScalar(0.5);
           rig.group.position.set(seat.x, 0.5, seat.z);
