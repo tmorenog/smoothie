@@ -7,8 +7,9 @@ const gl = { args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsaf
 
 export default defineConfig({
   testDir: "tests/e2e",
-  timeout: 120_000,
-  expect: { timeout: 15_000 },
+  // Generous limits: CI renders the full-screen WebGL café on a software GPU (SwiftShader).
+  timeout: 180_000,
+  expect: { timeout: 30_000 },
   fullyParallel: true,
   workers: 2,
   retries: process.env.CI ? 1 : 0,

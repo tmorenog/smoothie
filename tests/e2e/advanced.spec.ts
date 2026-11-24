@@ -76,6 +76,7 @@ test("croissants unlock at level 15 and bake for one minute, surviving a reload"
   const saved = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!).bakery.ovenEndsAt, SAVE_KEY);
   expect(typeof saved).toBe("number");
   await page.reload();
+  await openStation(page, info); // the station drawer starts hidden again
   await expect(page.getByTestId("oven-status")).toContainText(/(3\d|40)s left/);
   await page.clock.fastForward(41_000);
   await expect(page.getByTestId("oven-status")).toContainText("done");
