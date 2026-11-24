@@ -2,6 +2,24 @@ import { expect, test } from "@playwright/test";
 import { coins, openShopAndBuy, press, seed, stateAtLevel, SAVE_KEY } from "./helpers";
 import { RECIPES } from "../../lib/game/data";
 
+test("donuts unlock at level 5: fry, sprinkle and serve", async ({ page }, info) => {
+  const s = stateAtLevel(5, { coins: 30 });
+  s.currentOrder = { ...s.currentOrder!, customerId: "luna", recipeId: "donut" };
+  await seed(page, s);
+  await page.goto("/");
+  await expect(page.getByRole("tab", { name: /Donuts/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("order-text")).toContainText("Sprinkle Donut");
+  await openShopAndBuy(page, info, [/Buy donut dough/, /Buy pink sprinkles/]);
+  await expect(coins(page)).toHaveText("22");
+  await press(page.getByTestId("inv-donutDough"), info);
+  await press(page.getByRole("button", { name: /Fry/ }), info);
+  await expect(page.getByTestId("donut-status")).toContainText("Golden donut", { timeout: 10_000 });
+  await press(page.getByTestId("inv-sprinkles"), info);
+  await expect(page.getByTestId("donut-status")).toContainText("ready to serve");
+  await press(page.getByRole("button", { name: "Serve" }), info);
+  await expect(coins(page)).toHaveText(String(22 + RECIPES.donut.price));
+});
+
 test("coffee unlocks at level 10: buy beans, brew and serve", async ({ page }, info) => {
   const s = stateAtLevel(10, { coins: 30 });
   s.currentOrder = { ...s.currentOrder!, customerId: "dan", recipeId: "coffee" };

@@ -32,6 +32,8 @@ const EVENT_SOUNDS: Partial<Record<GameEvent["kind"], SoundName>> = {
   tillSecured: "ding",
   bakeDone: "ding",
   brewDone: "ding",
+  fryStart: "pour",
+  fryDone: "ding",
   hired: "coins",
 };
 
@@ -82,6 +84,7 @@ export function useGame() {
         if (e.kind === "served" && e.becameVip) pushToast("New VIP! They'll tip extra from now on. ⭐", "celebrate");
         if (e.kind === "bakeDone") pushToast("Ding! Croissants are golden. Take them out of the oven.", "ok");
         if (e.kind === "robber") pushToast("A masked bandit is sneaking towards the till!", "error");
+        if (e.kind === "fryDone") pushToast("Golden donut! Now add pink sprinkles.", "ok");
         if (e.kind === "brewDone") pushToast("Coffee is ready to serve.", "ok");
       }
       if (action.type !== "tick" && r.message) pushToast(r.message, "ok");
@@ -109,6 +112,7 @@ export function useGame() {
     state.blender.phase === "blending" ||
     state.blender.phase === "pouring" ||
     state.coffee.phase === "brewing" ||
+    state.donut.phase === "frying" ||
     state.bakery.bowlPhase === "whisking" ||
     state.bakery.oven === "baking";
   useEffect(() => {

@@ -13,7 +13,7 @@ export interface SceneView {
 }
 
 const TOP = 1.06; // counter top surface height
-const X = { till: -2.2, blender: -1.35, cup: -0.72, coffee: 0.2, bowl: 1.0, tray: 1.55, oven: 1.5 };
+const X = { fryer: -0.5, plate: 0.66, till: -2.2, blender: -1.35, cup: -0.72, coffee: 0.2, bowl: 1.0, tray: 1.55, oven: 1.5 };
 
 type Piece = { mesh: THREE.Object3D; ing: IngredientId; y: number; vy: number; rest: number; angle: number; r: number };
 
@@ -99,6 +99,15 @@ export class CafeScene {
 
   // bakery
   private bakeryGroup = new THREE.Group();
+
+  // donut fryer
+  private donutGroup = new THREE.Group();
+  private fryDonut!: THREE.Mesh;
+  private fryDonutMat!: THREE.MeshStandardMaterial;
+  private oilMat!: THREE.MeshStandardMaterial;
+  private bubbles: THREE.Mesh[] = [];
+  private plateDonut = new THREE.Group();
+  private topping = new THREE.Group();
   private bowlItems = new Map<IngredientId, THREE.Object3D>();
   private batter: THREE.Mesh;
   private whisk = new THREE.Group();
@@ -150,6 +159,7 @@ export class CafeScene {
     const cf = this.buildCoffee();
     this.coffeeLiquid = cf.liquid;
     this.coffeeStream = cf.stream;
+    this.buildDonutFryer();
     const bk = this.buildBakery();
     this.batter = bk.batter;
     this.ovenWindowMat = bk.windowMat;
@@ -530,6 +540,95 @@ export class CafeScene {
     return { liquid, stream };
   }
 
+  /** Fryer on the back counter plus a serving plate on the front counter. */
+  private buildDonutFryer() {
+    const g = this.donutGroup;
+    this.scene.add(g);
+    const steel = new THREE.MeshStandardMaterial({ color: "#c9c3b6", metalness: 0.7, roughness: 0.3 });
+    const fryer = new THREE.Group();
+    fryer.position.set(X.fryer, 1.045, -1.5);
+    g.add(fryer);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.24, 0.4), steel);
+    body.position.y = 0.12;
+    body.castShadow = true;
+    fryer.add(body);
+    const pink = new THREE.Mesh(new THREE.BoxGeometry(0.565, 0.06, 0.405), new THREE.MeshStandardMaterial({ color: "#e8728f", roughness: 0.5 }));
+    pink.position.y = 0.06;
+    fryer.add(pink);
+    this.oilMat = new THREE.MeshStandardMaterial({ color: "#c98a2c", emissive: "#ff9a3d", emissiveIntensity: 0.05, roughness: 0.15, metalness: 0.2 });
+    const oil = new THREE.Mesh(new THREE.PlaneGeometry(0.48, 0.32), this.oilMat);
+    oil.rotation.x = -Math.PI / 2;
+    oil.position.y = 0.235;
+    fryer.add(oil);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.3, 8), new THREE.MeshStandardMaterial({ color: "#3b3534" }));
+    handle.rotation.x = Math.PI / 2.6;
+    handle.position.set(0.18, 0.33, 0.25);
+    fryer.add(handle);
+    const ringGeo = new THREE.TorusGeometry(0.065, 0.034, 12, 24);
+    this.fryDonutMat = new THREE.MeshStandardMaterial({ color: "#f1d9a8", roughness: 0.7 });
+    this.fryDonut = new THREE.Mesh(ringGeo, this.fryDonutMat);
+    this.fryDonut.rotation.x = -Math.PI / 2;
+    this.fryDonut.position.y = 0.245;
+    this.fryDonut.visible = false;
+    fryer.add(this.fryDonut);
+    const bubbleMat = new THREE.MeshStandardMaterial({ color: "#ffe2a8", transparent: true, opacity: 0.7 });
+    for (let i = 0; i < 6; i++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 5), bubbleMat);
+      b.position.set(Math.cos(i * 1.7) * 0.15, 0.24, Math.sin(i * 1.7) * 0.1);
+      b.visible = false;
+      fryer.add(b);
+      this.bubbles.push(b);
+    }
+    // Plate with the finished donut
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 0.02, 24), new THREE.MeshStandardMaterial({ color: "#fbf6ee", roughness: 0.4 }));
+    plate.position.y = 0.01;
+    this.plateDonut.add(plate);
+    const cooked = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ color: "#d6923f", roughness: 0.6 }));
+    cooked.rotation.x = -Math.PI / 2;
+    cooked.position.y = 0.05;
+    cooked.castShadow = true;
+    this.plateDonut.add(cooked);
+    const glaze = new THREE.Mesh(new THREE.TorusGeometry(0.066, 0.03, 10, 24), new THREE.MeshStandardMaterial({ color: RECIPES.donut.color, roughness: 0.25 }));
+    glaze.rotation.x = -Math.PI / 2;
+    glaze.position.y = 0.065;
+    glaze.scale.z = 0.8;
+    this.topping.add(glaze);
+    const colors = ["#ffffff", "#7f9f7a", "#f2c84b", "#6f8fc9", "#e8435a"];
+    for (let i = 0; i < 18; i++) {
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.005, 0.005), new THREE.MeshBasicMaterial({ color: colors[i % colors.length] }));
+      const a = (i / 18) * Math.PI * 2;
+      const r = 0.05 + (i % 3) * 0.012;
+      sp.position.set(Math.cos(a) * r, 0.092, Math.sin(a) * r);
+      sp.rotation.y = i * 1.3;
+      this.topping.add(sp);
+    }
+    this.plateDonut.add(this.topping);
+    this.plateDonut.position.set(X.plate, TOP, 0.3);
+    this.plateDonut.visible = false;
+    g.add(this.plateDonut);
+  }
+
+  private animateDonut(t: number, now: number, motion: number) {
+    if (!this.donutGroup.visible) return;
+    const d = this.view!.state.donut;
+    const frying = d.phase === "frying";
+    this.fryDonut.visible = frying || (d.phase === "idle" && d.dough > 0);
+    const p = frying ? progress(d.endsAt, DURATIONS.fry, now) : 0;
+    this.fryDonutMat.color.set("#f1d9a8").lerp(new THREE.Color("#d6923f"), p);
+    this.fryDonut.position.y = 0.245 + (frying ? Math.sin(t * 6) * 0.006 * motion : 0.03);
+    this.oilMat.emissiveIntensity = frying ? 0.35 + Math.sin(t * 8) * 0.1 * motion : 0.05;
+    this.bubbles.forEach((b, i) => {
+      b.visible = frying;
+      if (frying) {
+        const ph = (t * 1.5 + i / 6) % 1;
+        b.position.y = 0.24 + ph * 0.04 * motion;
+        b.scale.setScalar(1 - ph * 0.6);
+      }
+    });
+    this.plateDonut.visible = d.phase === "fried" || d.phase === "decorated";
+    this.topping.visible = d.phase === "decorated";
+  }
+
   private buildBakery() {
     const g = this.bakeryGroup;
     this.scene.add(g);
@@ -743,6 +842,7 @@ export class CafeScene {
     this.coffeeGroup.visible = coffeeOn;
     this.plant.visible = !coffeeOn;
     this.bakeryGroup.visible = levelAtLeast(s, RECIPES.croissant.unlockLevel);
+    this.donutGroup.visible = levelAtLeast(s, RECIPES.donut.unlockLevel);
   }
 
   private syncPieces(contents: IngredientId[], key: string) {
@@ -793,6 +893,7 @@ export class CafeScene {
       s.blender.phase === "blending" ||
       s.blender.phase === "pouring" ||
       s.coffee.phase === "brewing" ||
+      s.donut.phase === "frying" ||
       s.bakery.bowlPhase === "whisking"
     );
   }
@@ -820,7 +921,7 @@ export class CafeScene {
 
     // Camera framing: wide view in landscape, follow the active station in portrait
     const wide = this.aspect >= 1.35;
-    const focusX = v.focus === "blender" ? -1.0 : v.focus === "coffee" ? 0.35 : 1.25;
+    const focusX = v.focus === "blender" ? -1.0 : v.focus === "coffee" ? 0.35 : v.focus === "donut" ? 0.1 : 1.25;
     const width = wide ? 5.6 : 3.1;
     const tx = wide ? 0 : focusX + 0.35;
     const vfov = (this.camera.fov * Math.PI) / 180;
@@ -855,9 +956,9 @@ export class CafeScene {
 
     // Avatar walks to the active station
     // Stand just beside the active station so the barista never hides the jar.
-    const avX = v.focus === "blender" ? -0.15 : v.focus === "coffee" ? -0.45 : 0.55;
+    const avX = v.focus === "blender" ? -0.15 : v.focus === "coffee" ? -0.45 : v.focus === "donut" ? 0.35 : 0.55;
     this.avatarAnchor.position.x += (avX - this.avatarAnchor.position.x) * Math.min(1, dt * 2.5);
-    const busy = s.blender.phase === "blending" || s.coffee.phase === "brewing" || s.bakery.bowlPhase === "whisking";
+    const busy = s.blender.phase === "blending" || s.coffee.phase === "brewing" || s.donut.phase === "frying" || s.bakery.bowlPhase === "whisking";
     this.avatarRig?.update(t, dt, busy, motion);
     let i = 0;
     for (const rig of this.staffRigs.values()) rig.update(t + i++ * 1.7, dt, "working", motion);
@@ -875,6 +976,7 @@ export class CafeScene {
 
     this.animateBlender(t, dt, now, motion);
     this.animateCoffee(t, dt, now, motion);
+    this.animateDonut(t, now, motion);
     this.animateBakery(t, now, motion);
   }
 

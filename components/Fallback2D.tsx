@@ -41,6 +41,14 @@ export function Fallback2D({ view }: { view: SceneView }) {
           </div>
           <span className="mt-1 text-xs font-semibold text-[#3b2a22]">Cup</span>
         </div>
+        {s.xp >= xpForLevel(RECIPES.donut.unlockLevel) && (
+          <div className="flex flex-col items-center">
+            <div className={`text-4xl ${s.donut.phase === "frying" ? "animate-pulse" : ""}`} aria-hidden>
+              {s.donut.phase === "decorated" ? "🍩" : s.donut.phase === "fried" ? "🥯" : s.donut.phase === "frying" ? "♨️" : "🍳"}
+            </div>
+            <span className="mt-1 text-xs font-semibold text-[#3b2a22]">Fryer</span>
+          </div>
+        )}
         {coffeeOn && (
           <div className="flex flex-col items-center">
             <div className="text-4xl" aria-hidden>

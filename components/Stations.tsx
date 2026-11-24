@@ -39,7 +39,7 @@ function IngredientChip({ id, count, onAdd, highlight, onDragState }: { id: Ingr
         data-testid={`inv-${id}`}
         data-tutorial={id === "strawberry" ? "inventory" : undefined}
         disabled={count <= 0}
-        aria-label={`Add ${ing.name.toLowerCase()} to the ${ing.station === "blender" ? "blender" : ing.station === "coffee" ? "coffee machine" : "mixing bowl"} (${count} in inventory)`}
+        aria-label={`Add ${ing.name.toLowerCase()} to the ${ing.station === "blender" ? "blender" : ing.station === "coffee" ? "coffee machine" : ing.station === "donut" ? "donut fryer" : "mixing bowl"} (${count} in inventory)`}
         className={`relative flex min-h-14 min-w-[5.5rem] touch-none select-none flex-col items-center justify-center rounded-2xl bg-white px-3 py-1.5 text-sm font-semibold text-[#3b2a22] shadow-sm ring-1 ring-[#e3d5c3] transition hover:bg-[#fdf3ea] active:scale-95 disabled:opacity-40 focus-visible:outline-4 focus-visible:outline-[#3b2a22]${glow(highlight)}`}
         onPointerDown={(e) => {
           if (count <= 0 || (e.pointerType === "mouse" && e.button !== 0)) return;
@@ -215,6 +215,34 @@ export function CoffeePanel({ state, dispatch, dragging, onDragState }: { state:
             {c.phase === "ready" ? "Pour out" : "Remove beans"}
           </button>
         </div>
+      </DropZone>
+    </div>
+  );
+}
+
+export function DonutPanel({ state, dispatch, dragging, onDragState }: { state: GameState; dispatch: Dispatch; dragging: Station | null; onDragState: (s: Station | null) => void }) {
+  const d = state.donut;
+  const now = useNow(d.phase === "frying");
+  return (
+    <div className="flex flex-col gap-3">
+      <Inventory state={state} station="donut" dispatch={dispatch} tutorial={null} onDragState={onDragState} label="Your inventory: donuts" />
+      <DropZone station="donut" active={dragging === "donut"} label="Donut fryer drop zone">
+        <h3 className="font-bold text-[#3b2a22]">Donut fryer</h3>
+        <p className="text-sm text-[#7a5a44]" data-testid="donut-status">
+          {d.phase === "idle" && (d.dough ? "Dough ring in the fryer. Press Fry." : "Add a ring of donut dough.")}
+          {d.phase === "frying" && "Sizzling… turning golden!"}
+          {d.phase === "fried" && "Golden donut! Tap pink sprinkles to decorate it."}
+          {d.phase === "decorated" && "Sprinkle Donut ready to serve! 🍩"}
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button type="button" className={btnPrimary} disabled={d.phase !== "idle" || d.dough < 1} onClick={() => dispatch({ type: "fry", now: Date.now() })}>
+            🍩 Fry
+          </button>
+          <button type="button" className={btnGhost} disabled={d.phase === "frying" || (d.phase === "idle" && d.dough === 0)} onClick={() => dispatch({ type: "emptyFryer" })}>
+            {d.phase === "idle" ? "Remove dough" : "Toss donut"}
+          </button>
+        </div>
+        {d.phase === "frying" && <Progress value={1 - Math.max(0, (d.endsAt ?? now) - now) / DURATIONS.fry} label="Frying progress" />}
       </DropZone>
     </div>
   );

@@ -79,6 +79,11 @@ export interface GameState {
     phase: "idle" | "brewing" | "ready";
     endsAt: number | null;
   };
+  donut: {
+    dough: number;
+    phase: "idle" | "frying" | "fried" | "decorated";
+    endsAt: number | null;
+  };
   bakery: {
     bowl: IngredientId[];
     bowlPhase: "idle" | "whisking" | "whisked";
@@ -107,6 +112,8 @@ export type Action =
   | { type: "tossCup" }
   | { type: "brew"; now: number }
   | { type: "emptyCoffee" }
+  | { type: "fry"; now: number }
+  | { type: "emptyFryer" }
   | { type: "whisk"; now: number }
   | { type: "emptyBowl" }
   | { type: "transferToTray" }
@@ -134,6 +141,8 @@ export type GameEvent =
   | { kind: "pourDone"; recipe: RecipeId }
   | { kind: "brewStart" }
   | { kind: "brewDone" }
+  | { kind: "fryStart" }
+  | { kind: "fryDone" }
   | { kind: "whiskStart" }
   | { kind: "whiskDone" }
   | { kind: "bakeStart" }
@@ -184,6 +193,7 @@ export function createInitialState(): GameState {
     blender: { contents: [], phase: "idle", endsAt: null, result: null },
     cup: null,
     coffee: { beans: 0, phase: "idle", endsAt: null },
+    donut: { dough: 0, phase: "idle", endsAt: null },
     bakery: {
       bowl: [],
       bowlPhase: "idle",
@@ -241,6 +251,7 @@ export function isRecipeUnlocked(state: GameState, id: RecipeId) {
 
 export function isStationUnlocked(state: GameState, station: Station) {
   if (station === "coffee") return getLevel(state) >= RECIPES.coffee.unlockLevel;
+  if (station === "donut") return getLevel(state) >= RECIPES.donut.unlockLevel;
   if (station === "bakery") return getLevel(state) >= RECIPES.croissant.unlockLevel;
   return true;
 }
@@ -337,6 +348,8 @@ function availableFor(state: GameState): Inventory {
   const inv = { ...state.inventory };
   if (state.blender.phase === "idle") for (const c of state.blender.contents) inv[c]++;
   if (state.coffee.phase === "idle") inv.coffeeBeans += state.coffee.beans;
+  if (state.donut.phase === "idle") inv.donutDough += state.donut.dough;
+  else if (state.donut.phase === "frying" || state.donut.phase === "fried") inv.donutDough += 1; // only sprinkles still needed
   if (state.bakery.bowlPhase === "idle") for (const c of state.bakery.bowl) inv[c]++;
   return inv;
 }
@@ -351,6 +364,8 @@ export function hasItemInProgress(state: GameState, recipeId: RecipeId): boolean
     return false;
   }
   if (recipe.station === "coffee") return state.coffee.phase !== "idle";
+  // A fried (undecorated) donut still needs sprinkles, so it isn't "done".
+  if (recipe.station === "donut") return state.donut.phase === "decorated";
   return (
     state.bakery.croissants > 0 ||
     state.bakery.oven !== "idle" ||
@@ -402,6 +417,7 @@ function isTimedBusy(state: GameState): boolean {
     state.blender.phase === "blending" ||
     state.blender.phase === "pouring" ||
     state.coffee.phase === "brewing" ||
+    state.donut.phase === "frying" ||
     state.bakery.bowlPhase === "whisking"
   );
 }
@@ -461,6 +477,10 @@ export function tick(state: GameState, now: number): Result {
   if (s.coffee.phase === "brewing" && s.coffee.endsAt !== null && now >= s.coffee.endsAt) {
     s = { ...s, coffee: { beans: 0, phase: "ready", endsAt: null } };
     events.push({ kind: "brewDone" });
+  }
+  if (s.donut.phase === "frying" && s.donut.endsAt !== null && now >= s.donut.endsAt) {
+    s = { ...s, donut: { dough: 0, phase: "fried", endsAt: null } };
+    events.push({ kind: "fryDone" });
   }
   if (s.bakery.bowlPhase === "whisking" && s.bakery.whiskEndsAt !== null && now >= s.bakery.whiskEndsAt) {
     s = { ...s, bakery: { ...s.bakery, bowlPhase: "whisked", whiskEndsAt: null } };
@@ -523,6 +543,27 @@ export function applyAction(state: GameState, action: Action): Result {
           { ...state, inventory: inv, coffee: { ...state.coffee, beans: 1 } },
           [{ kind: "added", ingredient: ing.id, station: "coffee" }],
           "Beans loaded into the coffee machine.",
+        );
+      }
+      if (ing.station === "donut") {
+        if (!isStationUnlocked(state, "donut")) return fail(state, "The donut fryer opens at level 5.");
+        const d = state.donut;
+        if (ing.id === "donutDough") {
+          if (d.phase !== "idle") return fail(state, "Serve or toss the donut in the fryer first.");
+          if (d.dough >= 1) return fail(state, "There's already a donut ring in the fryer.");
+          return ok(
+            { ...state, inventory: inv, donut: { ...d, dough: 1 } },
+            [{ kind: "added", ingredient: ing.id, station: "donut" }],
+            "Donut ring lowered into the fryer.",
+          );
+        }
+        // sprinkles go on a freshly fried donut
+        if (d.phase === "decorated") return fail(state, "This donut already has sprinkles.");
+        if (d.phase !== "fried") return fail(state, "Fry a donut first, then add sprinkles.");
+        return ok(
+          { ...state, inventory: inv, donut: { ...d, phase: "decorated" } },
+          [{ kind: "added", ingredient: ing.id, station: "donut" }],
+          "Pink glaze and sprinkles on top!",
         );
       }
       // bakery
@@ -597,6 +638,29 @@ export function applyAction(state: GameState, action: Action): Result {
       return fail(state, "The coffee machine is empty.");
     }
 
+    case "fry": {
+      if (!isStationUnlocked(state, "donut")) return fail(state, "The donut fryer opens at level 5.");
+      const d = state.donut;
+      if (d.phase === "frying") return fail(state, "Already frying.");
+      if (d.phase !== "idle") return fail(state, "Serve or toss the donut first.");
+      if (d.dough < 1) return fail(state, "Add donut dough first.");
+      return ok({ ...state, donut: { ...d, phase: "frying", endsAt: action.now + DURATIONS.fry } }, [{ kind: "fryStart" }], "Sizzle! Frying the donut…");
+    }
+
+    case "emptyFryer": {
+      const d = state.donut;
+      if (d.phase === "frying") return fail(state, "Wait for the donut to finish frying.");
+      if (d.phase === "fried" || d.phase === "decorated")
+        return ok({ ...state, donut: { dough: 0, phase: "idle", endsAt: null } }, [{ kind: "tossed" }], "Donut tossed. Fry a fresh one!");
+      if (d.dough > 0)
+        return ok(
+          { ...state, inventory: { ...state.inventory, donutDough: state.inventory.donutDough + d.dough }, donut: { ...d, dough: 0 } },
+          [],
+          "Dough returned to your inventory.",
+        );
+      return fail(state, "The fryer is empty.");
+    }
+
     case "whisk": {
       if (!isStationUnlocked(state, "bakery")) return fail(state, "The bakery opens at level 15.");
       const k = state.bakery;
@@ -663,6 +727,10 @@ export function applyAction(state: GameState, action: Action): Result {
       } else if (recipe.station === "coffee") {
         if (state.coffee.phase !== "ready") return fail(state, `Brew a coffee for ${name} first.`);
         next = { ...state, coffee: { beans: 0, phase: "idle", endsAt: null } };
+      } else if (recipe.station === "donut") {
+        if (state.donut.phase === "fried") return fail(state, `Add pink sprinkles to ${name}'s donut first.`);
+        if (state.donut.phase !== "decorated") return fail(state, `Fry and decorate a donut for ${name} first.`);
+        next = { ...state, donut: { dough: 0, phase: "idle", endsAt: null } };
       } else {
         if (state.bakery.croissants <= 0) return fail(state, `Bake croissants for ${name} first.`);
         next = { ...state, bakery: { ...state.bakery, croissants: state.bakery.croissants - 1 } };

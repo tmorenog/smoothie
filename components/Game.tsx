@@ -19,7 +19,7 @@ import type { SceneView } from "@/lib/scene/CafeScene";
 import { AvatarFace, CatFace } from "./CatFace";
 import { HelpModal, ManageModal, ShopModal, StatusBadge } from "./Modals";
 import { Scene3D } from "./Scene3D";
-import { BakeryPanel, BlenderPanel, CoffeePanel, btnGhost, btnPrimary, btnSage, glow } from "./Stations";
+import { BakeryPanel, BlenderPanel, CoffeePanel, DonutPanel, btnGhost, btnPrimary, btnSage, glow } from "./Stations";
 import { useGame, type Toast } from "./useGame";
 
 const TUTORIAL_TEXT: Record<Exclude<TutorialStep, null>, { step: string; text: string }> = {
@@ -60,7 +60,7 @@ export default function Game() {
   const view: SceneView = useMemo(() => ({ state, focus, reducedMotion: reduce, happy }), [state, focus, reduce, happy]);
   const lp = levelProgress(state.xp);
 
-  const servable = !!order && order.status === "waiting" && (state.cup !== null || state.coffee.phase === "ready" || state.bakery.croissants > 0) && state.blender.phase !== "pouring";
+  const servable = !!order && order.status === "waiting" && (state.cup !== null || state.coffee.phase === "ready" || state.donut.phase === "decorated" || state.bakery.croissants > 0) && state.blender.phase !== "pouring";
   const rescue = canRescue(state);
 
   return (
@@ -104,6 +104,7 @@ export default function Game() {
             <StationTabs state={state} focus={focus} setFocus={setFocus} />
             <div className="mt-3" role="tabpanel" id={`panel-${focus}`} aria-labelledby={`tab-${focus}`}>
               {focus === "blender" && <BlenderPanel state={state} dispatch={dispatch} tutorial={tutorial} dragging={dragging} onDragState={setDragging} />}
+              {focus === "donut" && <DonutPanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
               {focus === "coffee" && <CoffeePanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
               {focus === "bakery" && <BakeryPanel state={state} dispatch={dispatch} dragging={dragging} onDragState={setDragging} />}
             </div>
@@ -214,11 +215,12 @@ function OrderCard({ state }: { state: GameState }) {
 function StationTabs({ state, focus, setFocus }: { state: GameState; focus: Station; setFocus: (s: Station) => void }) {
   const tabs: [Station, string, number][] = [
     ["blender", "🍓 Blender", 1],
+    ["donut", "🍩 Donuts", 5],
     ["coffee", "☕ Coffee", 10],
     ["bakery", "🥐 Bakery", 15],
   ];
   return (
-    <div role="tablist" aria-label="Stations" className="grid grid-cols-3 gap-1 rounded-2xl bg-[#f0e3d4] p-1">
+    <div role="tablist" aria-label="Stations" className="grid grid-cols-4 gap-1 rounded-2xl bg-[#f0e3d4] p-1">
       {tabs.map(([id, label, lvl]) => {
         const unlocked = isStationUnlocked(state, id);
         return (
@@ -231,7 +233,7 @@ function StationTabs({ state, focus, setFocus }: { state: GameState; focus: Stat
             aria-controls={`panel-${id}`}
             disabled={!unlocked}
             onClick={() => setFocus(id)}
-            className={`min-h-11 rounded-xl px-2 text-sm font-bold transition focus-visible:outline-4 focus-visible:outline-[#3b2a22] ${focus === id ? "bg-white shadow-sm" : "text-[#7a5a44]"} disabled:opacity-60`}
+            className={`min-h-11 rounded-xl px-1 text-xs font-bold sm:text-sm transition focus-visible:outline-4 focus-visible:outline-[#3b2a22] ${focus === id ? "bg-white shadow-sm" : "text-[#7a5a44]"} disabled:opacity-60`}
           >
             {unlocked ? label : `🔒 Lv ${lvl}`}
           </button>

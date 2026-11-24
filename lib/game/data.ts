@@ -7,17 +7,20 @@ export type IngredientId =
   | "egg"
   | "flour"
   | "wheat"
-  | "butter";
+  | "butter"
+  | "donutDough"
+  | "sprinkles";
 
 /** Which station an ingredient belongs to. Stations never share contents. */
-export type Station = "blender" | "coffee" | "bakery";
+export type Station = "blender" | "coffee" | "donut" | "bakery";
 
 export type RecipeId =
   | "strawberrySmoothie"
   | "bananaSmoothie"
   | "sunriseSmoothie"
   | "coffee"
-  | "croissant";
+  | "croissant"
+  | "donut";
 
 export type CustomerId =
   | "mochi"
@@ -112,6 +115,26 @@ export const INGREDIENTS: Record<IngredientId, Ingredient> = {
     emoji: "🧈",
     color: "#f6dc7d",
   },
+  donutDough: {
+    id: "donutDough",
+    name: "Donut dough",
+    plural: "Donut dough",
+    price: 6,
+    station: "donut",
+    unlockLevel: 5,
+    emoji: "🍩",
+    color: "#e9c48a",
+  },
+  sprinkles: {
+    id: "sprinkles",
+    name: "Pink sprinkles",
+    plural: "Pink sprinkles",
+    price: 2,
+    station: "donut",
+    unlockLevel: 5,
+    emoji: "✨",
+    color: "#f7b6c8",
+  },
 };
 
 export const INGREDIENT_IDS = Object.keys(INGREDIENTS) as IngredientId[];
@@ -192,6 +215,18 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     color: "#d9953f",
     flavor: "flaky butter",
     batch: 2,
+  },
+  donut: {
+    id: "donut",
+    name: "Sprinkle Donut",
+    station: "donut",
+    ingredients: { donutDough: 1, sprinkles: 1 },
+    price: 22,
+    xp: 15,
+    unlockLevel: 5,
+    color: "#f39ab3",
+    flavor: "warm glazed strawberry",
+    batch: 1,
   },
 };
 
@@ -302,7 +337,7 @@ export const CUSTOMERS: Record<CustomerId, Customer> = {
     name: "Luna",
     description: "Calico with orange and black patches",
     unlockLevel: 4,
-    favorite: "sunriseSmoothie",
+    favorite: "donut",
     coat: {
       pattern: "calico",
       base: "#f5efe5",
@@ -436,6 +471,7 @@ export const DURATIONS = {
   pour: 2000,
   brew: 3200,
   whisk: 1800,
+  fry: 3000,
   bake: 60_000,
 } as const;
 
@@ -452,7 +488,7 @@ export const LEVEL_UNLOCKS: { level: number; text: string }[] = [
   { level: 2, text: "Bananas, Banana Smoothie and new customer Dan" },
   { level: 3, text: "Berry-Banana Sunrise and staff hiring (Hazel)" },
   { level: 4, text: "New customer Luna" },
-  { level: 5, text: "Barista Bean can be hired" },
+  { level: 5, text: "Donut fryer: donut dough, pink sprinkles and Sprinkle Donuts. Barista Bean can be hired" },
   { level: 6, text: "New customer Pepper" },
   { level: 8, text: "Cashier Clover and new customer Biscuit" },
   { level: 10, text: "Coffee station and coffee beans" },

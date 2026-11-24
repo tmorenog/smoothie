@@ -323,6 +323,52 @@ describe("level unlocks", () => {
   });
 });
 
+describe("donuts", () => {
+  it("unlock at level 5 with their own ingredients", () => {
+    expect(isStationUnlocked(withLevel(4), "donut")).toBe(false);
+    expect(isStationUnlocked(withLevel(5), "donut")).toBe(true);
+    expect(applyAction({ ...withLevel(4), coins: 50 }, { type: "buy", ingredient: "donutDough" }).ok).toBe(false);
+    expect(isIngredientUnlocked(withLevel(5), "sprinkles")).toBe(true);
+  });
+
+  it("fry, decorate and serve a donut exactly once", () => {
+    let s = withLevel(5, { coins: 30 });
+    s = { ...s, currentOrder: { ...s.currentOrder!, customerId: "luna", recipeId: "donut" } };
+    s = run(s, { type: "buy", ingredient: "donutDough" }, { type: "buy", ingredient: "sprinkles" });
+    expect(s.coins).toBe(22);
+    // sprinkles can't go on raw dough, and donut items never enter the blender
+    expect(applyAction(s, { type: "add", ingredient: "sprinkles" }).ok).toBe(false);
+    s = run(s, { type: "add", ingredient: "donutDough" });
+    expect(s.blender.contents).toEqual([]);
+    expect(s.donut.dough).toBe(1);
+    s = run(s, { type: "fry", now: T0 });
+    expect(applyAction(s, { type: "fry", now: T0 + 10 }).ok).toBe(false);
+    expect(applyAction(s, { type: "serve", now: T0 + 10 }).ok).toBe(false);
+    s = run(s, { type: "tick", now: T0 + DURATIONS.fry });
+    expect(s.donut.phase).toBe("fried");
+    expect(applyAction(s, { type: "serve", now: T0 + 4000 }).message).toMatch(/sprinkles/);
+    s = run(s, { type: "add", ingredient: "sprinkles" });
+    expect(s.inventory.sprinkles).toBe(0);
+    s = run(s, { type: "serve", now: T0 + 5000 });
+    expect(s.coins).toBe(22 + RECIPES.donut.price);
+    expect(s.donut.phase).toBe("idle");
+    expect(applyAction(s, { type: "serve", now: T0 + 6000 }).ok).toBe(false);
+  });
+
+  it("returns raw dough and can toss a finished donut", () => {
+    let s = run(withLevel(5, { coins: 30 }), { type: "buy", ingredient: "donutDough" }, { type: "add", ingredient: "donutDough" }, { type: "emptyFryer" });
+    expect(s.inventory.donutDough).toBe(1);
+    s = run(s, { type: "add", ingredient: "donutDough" }, { type: "fry", now: T0 }, { type: "tick", now: T0 + 5000 }, { type: "emptyFryer" });
+    expect(s.donut).toEqual({ dough: 0, phase: "idle", endsAt: null });
+  });
+
+  it("keeps a frying donut across a reload", () => {
+    const s = run(withLevel(5, { coins: 30 }), { type: "buy", ingredient: "donutDough" }, { type: "add", ingredient: "donutDough" }, { type: "fry", now: T0 });
+    expect(deserialize(serialize(s), T0 + 1000).donut.phase).toBe("frying");
+    expect(deserialize(serialize(s), T0 + 5000).donut.phase).toBe("fried");
+  });
+});
+
 describe("baking croissants", () => {
   function doughOnTray() {
     let s = withLevel(15, { coins: 100 });

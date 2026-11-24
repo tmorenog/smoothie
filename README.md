@@ -69,6 +69,7 @@ The tutorial highlights Shop → Inventory → ON → Pour → Serve. Press **Sk
 | Strawberry Smoothie (light pink) | strawberry (5) | 12 | 10 | Level 1 |
 | Banana Smoothie (creamy yellow) | banana (15) | 28 | 14 | Level 2 |
 | Berry-Banana Sunrise (peachy orange) | strawberry + banana (20) | 38 | 18 | Level 3 |
+| Sprinkle Donut 🍩 | donut dough (6) + pink sprinkles (2) | 22 | 15 | Level 5 |
 | Fresh Coffee | coffee beans (8) | 24 | 20 | Level 10 |
 | Butter Croissant ×2 per batch | egg (5) + flour (4) + wheat (3) + butter (6) | 30 each | 26 | Level 15 |
 
@@ -80,6 +81,16 @@ Colors mix: strawberry gives light pink, banana gives creamy yellow, and both to
 - **Blended the wrong smoothie?** **Rinse jar** before pouring, or pour it and either **Toss cup** or keep it for a later customer who orders it. Serving the wrong drink is refused politely, and the cup stays.
 - **Out of coins for the current order?** A **Tip jar** button appears. The neighbours cover exactly the shortfall, so you're never stuck.
 - Buttons disable while an animation runs, and the engine rejects repeated actions. Nothing can be served twice, paid twice or pushed below zero.
+
+### Donut fryer (level 5) 🍩
+
+1. Open the **🍩 Donuts** tab, which also opens automatically when a customer orders a donut.
+2. Buy **donut dough** (6) and **pink sprinkles** (2) in the Shop.
+3. Tap the dough to lower a ring into the fryer, then press **🍩 Fry**. The oil glows and bubbles while the donut turns golden (3 s).
+4. Tap the **sprinkles** onto the hot donut. Pink glaze and rainbow sprinkles appear on a plate on the counter.
+5. Press **Serve**. **Remove dough** / **Toss donut** undo mistakes. Sprinkles only work on a fried donut, and donut ingredients never go into the blender.
+
+Luna the calico's favourite treat is a Sprinkle Donut.
 
 ### Coffee station (level 10)
 
@@ -126,9 +137,9 @@ Mochi (tuxedo, white chest), Socks (brown tabby with dark brown markings and pat
 
 ## Design notes and choices
 
-- **Progression:** total XP for level *L* is `20·(L−1) + 5·(L−1)(L−2)/2`. Level 2 takes 20 XP (two strawberry orders), level 10 takes 360 XP, and level 15 takes 735 XP. Coffee unlocks at 10 and the bakery at 15, as specified. Bananas unlock at level 2 so the first few orders stay simple.
+- **Progression:** total XP for level *L* is `20·(L−1) + 5·(L−1)(L−2)/2`. Level 2 takes 20 XP (two strawberry orders), level 10 takes 360 XP, and level 15 takes 735 XP. Donuts unlock at 5, coffee at 10 and the bakery at 15, as specified. Bananas unlock at level 2 so the first few orders stay simple.
 - **Affordability:** new orders are only drawn from recipes whose missing ingredients you can afford with your current coins and inventory (counting anything already in a station). Every recipe is profitable. If coins still run dry, the tip jar covers exactly the shortfall for the current order.
-- **Fairness guards:** one active order at a time with unique increasing IDs. Serving changes the order to `served` and pays exactly once. Inventory is checked before every decrement. Every timed step (blend 2.6 s, pour 2 s, brew 3.2 s, whisk 1.8 s, bake 60 s) is stored as an end timestamp and completed by `tick`, so repeated clicks and reloads can't duplicate anything.
+- **Fairness guards:** one active order at a time with unique increasing IDs. Serving changes the order to `served` and pays exactly once. Inventory is checked before every decrement. Every timed step (blend 2.6 s, pour 2 s, fry 3 s, brew 3.2 s, whisk 1.8 s, bake 60 s) is stored as an end timestamp and completed by `tick`, so repeated clicks and reloads can't duplicate anything.
 - **Staff** give flat per-order bonuses rather than automating work, so the player always makes the drinks.
 - **VIP** is based on visits so it rewards regular play: regular at 3 visits, VIP at 5.
 
@@ -146,7 +157,7 @@ lib/game/
   data.ts            Ingredients, recipes, customers, staff, durations
   engine.ts          Pure reducer (applyAction), levels, mixing, orders, tutorial
   persistence.ts     Validated localStorage save/load (timers fast-forward on load)
-lib/scene/           Imperative Three.js: café room, blender, cup, coffee, oven, cats, avatar
+lib/scene/           Imperative Three.js: café room, blender, cup, donut fryer, coffee, oven, cats, avatar
 lib/sound.ts         Synthesized Web Audio effects (no audio files)
 tests/unit/          Vitest engine tests
 tests/e2e/           Playwright browser tests

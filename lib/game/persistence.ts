@@ -27,6 +27,7 @@ export function sanitize(raw: unknown): GameState {
   const blender = obj(r.blender);
   const coffee = obj(r.coffee);
   const bakery = obj(r.bakery);
+  const donut = obj(r.donut);
   const avatar = obj(r.avatar);
   const robber = obj(r.robber);
   const tutorial = obj(r.tutorial);
@@ -70,6 +71,11 @@ export function sanitize(raw: unknown): GameState {
       phase: oneOf(coffee.phase, ["idle", "brewing", "ready"] as const, "idle"),
       endsAt: timestamp(coffee.endsAt),
     },
+    donut: {
+      dough: Math.min(1, nonNegInt(donut.dough, 0)),
+      phase: oneOf(donut.phase, ["idle", "frying", "fried", "decorated"] as const, "idle"),
+      endsAt: timestamp(donut.endsAt),
+    },
     bakery: {
       bowl: Array.isArray(bakery.bowl) ? [...new Set(bakery.bowl.filter(isIngredient).filter((i) => INGREDIENTS[i].station === "bakery"))] : [],
       bowlPhase: oneOf(bakery.bowlPhase, ["idle", "whisking", "whisked"] as const, "idle"),
@@ -105,6 +111,7 @@ export function sanitize(raw: unknown): GameState {
   if (state.blender.phase === "blending" || state.blender.phase === "pouring") state.blender.endsAt ??= 1;
   if (state.blender.phase !== "idle" && !state.blender.result) state.blender.result = "strawberrySmoothie";
   if (state.coffee.phase === "brewing") state.coffee.endsAt ??= 1;
+  if (state.donut.phase === "frying") state.donut.endsAt ??= 1;
   if (state.bakery.bowlPhase === "whisking") state.bakery.whiskEndsAt ??= 1;
   if (state.bakery.oven === "baking") state.bakery.ovenEndsAt ??= 1;
   if (!state.specials.length) state.nextSpecialId = Math.max(1, state.nextSpecialId);

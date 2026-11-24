@@ -77,7 +77,7 @@ export function Modal({ open, onClose, title, children, wide = false }: { open: 
   );
 }
 
-const STATION_LABEL: Record<Station, string> = { blender: "Smoothie fruit", coffee: "Coffee", bakery: "Bakery pantry" };
+const STATION_LABEL: Record<Station, string> = { blender: "Smoothie fruit", coffee: "Coffee", donut: "Donut fryer", bakery: "Bakery pantry" };
 
 export function ShopModal({ open, onClose, state, dispatch, tutorial }: { open: boolean; onClose: () => void; state: GameState; dispatch: Dispatch; tutorial: TutorialStep }) {
   return (
@@ -85,7 +85,7 @@ export function ShopModal({ open, onClose, state, dispatch, tutorial }: { open: 
       <p className="mb-3 text-sm text-[#7a5a44]">
         You have <strong data-testid="shop-coins">{state.coins}</strong> Smoothie Coins. Purchases go straight into your inventory.
       </p>
-      {(["blender", "coffee", "bakery"] as Station[]).map((station) => (
+      {(["blender", "donut", "coffee", "bakery"] as Station[]).map((station) => (
         <section key={station} className="mb-4">
           <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-[#7a5a44]">{STATION_LABEL[station]}</h3>
           <ul className="flex flex-col gap-2">
@@ -167,6 +167,12 @@ export function HelpModal({ open, onClose, dispatch }: { open: boolean; onClose:
           <p className="text-sm">
             Before blending, <em>Take fruit out</em> returns it to your inventory. A wrong smoothie can be kept for a later customer, or tossed. If you run out of coins for an order, the
             neighbourhood <em>tip jar</em> covers the shortfall.
+          </p>
+        </section>
+        <section>
+          <h3 className="font-extrabold">Donuts (level 5)</h3>
+          <p className="text-sm">
+            Buy donut dough and pink sprinkles. Tap the dough into the fryer, press <em>Fry</em>, then tap the sprinkles onto the hot donut and <em>Serve</em>. <em>Toss donut</em> undoes mistakes.
           </p>
         </section>
         <section>
