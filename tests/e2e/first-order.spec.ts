@@ -4,6 +4,9 @@ import { coins, openShopAndBuy, press } from "./helpers";
 test("plays the entire first order, then keeps playing after a reload", async ({ page }, info) => {
   await page.goto("/");
   await expect(coins(page)).toHaveText("5");
+  // The market stays hidden until the Shop button is pressed.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("shop-item-strawberry")).toHaveCount(0);
   await expect(page.getByTestId("customer-name")).toHaveText("Mochi");
   await expect(page.getByTestId("order-text")).toContainText("Strawberry Smoothie");
 

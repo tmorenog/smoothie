@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { coins } from "./helpers";
+import { createInitialState } from "../../lib/game/engine";
+import { coins, seed } from "./helpers";
 
 test.describe("desktop input", () => {
   test.skip(({ isMobile }) => isMobile, "desktop-only input tests");
@@ -52,6 +53,24 @@ test.describe("desktop input", () => {
     await page.mouse.move(b.x + b.width / 2, b.y + 20, { steps: 6 });
     await page.mouse.up();
     await expect(page.getByTestId("blender-status")).toContainText("Strawberry (1/4)");
+  });
+
+  test("market lets you pick a quantity and shows a receipt", async ({ page }) => {
+    const st = createInitialState();
+    await seed(page, { ...st, coins: 30, tutorial: { dismissed: true, completed: true } });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Shop/ }).click();
+    const market = page.getByRole("dialog", { name: /Market/ });
+    await expect(market.getByRole("heading", { name: "Whiskers' Market" })).toBeVisible();
+    await market.getByRole("button", { name: "One more strawberry" }).click();
+    await market.getByRole("button", { name: "One more strawberry" }).click();
+    await market.getByRole("button", { name: "Buy 3 strawberries for 15 coins" }).click();
+    await expect(page.getByTestId("shop-coins")).toHaveText(/15/);
+    await expect(page.getByTestId("receipt")).toContainText("3 × Strawberry");
+    await expect(market.getByTestId("shop-item-strawberry")).toContainText("In your pantry: 3");
+    await market.getByRole("button", { name: "Close the market" }).click();
+    await expect(market).toBeHidden();
+    await expect(page.getByTestId("inv-strawberry")).toContainText("×3");
   });
 
   test("reset asks for confirmation", async ({ page }) => {

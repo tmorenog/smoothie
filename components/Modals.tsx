@@ -5,15 +5,21 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { CUSTOMERS, INGREDIENTS, INGREDIENT_IDS, LEVEL_UNLOCKS, MAX_SPECIALS, RECIPES, RECIPE_IDS, STAFF, STAFF_IDS, VIP_VISITS, REGULAR_VISITS, type Station } from "@/lib/game/data";
 import { customerStatus, getLevel, isIngredientUnlocked, isRecipeUnlocked, unlockedCustomers, type Action, type Avatar, type GameState, type TutorialStep } from "@/lib/game/engine";
 import { AvatarFace, CatFace } from "./CatFace";
+import { ProductArt } from "./ShopArt";
 import { btnGhost, btnPrimary, btnSage, glow } from "./Stations";
 
 type Dispatch = (a: Action) => unknown;
 
-export function Modal({ open, onClose, title, children, wide = false }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+export function Modal({ open, onClose, title, children, wide = false, bare = false }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean; bare?: boolean }) {
   const reduce = useReducedMotion();
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  // Keep the latest onClose without re-running the open/close effect on every render.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -23,7 +29,7 @@ export function Modal({ open, onClose, title, children, wide = false }: { open: 
       first?.focus();
     }, 30);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeRef.current();
       if (e.key === "Tab" && panel.current) {
         const f = [...panel.current.querySelectorAll<HTMLElement>("button:not([disabled]), input, select, [tabindex='0']")];
         if (!f.length) return;
@@ -44,23 +50,28 @@ export function Modal({ open, onClose, title, children, wide = false }: { open: 
       window.removeEventListener("keydown", onKey);
       returnFocus.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return (
     <AnimatePresence>
       {open && (
-        <motion.div className="fixed inset-0 z-50 flex items-end justify-center bg-[#3b2a22]/45 p-0 sm:items-center sm:p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+        <motion.div className="fixed inset-0 z-50 flex items-end justify-center bg-[#3b2a22]/45 p-0 sm:items-center sm:p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(e) => e.target === e.currentTarget && closeRef.current()}>
           <motion.div
             ref={panel}
             role="dialog"
             aria-modal="true"
-            aria-labelledby={titleId}
-            className={`flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-3xl bg-[#fbf6ee] shadow-2xl sm:rounded-3xl ${wide ? "sm:max-w-2xl" : "sm:max-w-lg"}`}
+            aria-labelledby={bare ? undefined : titleId}
+            aria-label={bare ? title : undefined}
+            className={`flex w-full flex-col overflow-hidden shadow-2xl ${bare ? "h-[100svh] bg-[#5e3d27] sm:h-auto sm:max-h-[94svh] sm:max-w-4xl sm:rounded-3xl" : `max-h-[92svh] rounded-t-3xl bg-[#fbf6ee] sm:rounded-3xl ${wide ? "sm:max-w-2xl" : "sm:max-w-lg"}`}`}
             initial={reduce ? { opacity: 0 } : { y: 40, opacity: 0 }}
             animate={reduce ? { opacity: 1 } : { y: 0, opacity: 1 }}
             exit={reduce ? { opacity: 0 } : { y: 40, opacity: 0 }}
             transition={{ type: "spring", damping: 26, stiffness: 300 }}
           >
+            {bare ? (
+              children
+            ) : (
+              <>
             <div className="flex items-center justify-between border-b border-[#eadccb] px-5 py-3">
               <h2 id={titleId} className="text-xl font-extrabold text-[#3b2a22]">
                 {title}
@@ -70,6 +81,8 @@ export function Modal({ open, onClose, title, children, wide = false }: { open: 
               </button>
             </div>
             <div className="overflow-y-auto overscroll-contain px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">{children}</div>
+              </>
+            )}
           </motion.div>
         </motion.div>
       )}
@@ -77,53 +90,128 @@ export function Modal({ open, onClose, title, children, wide = false }: { open: 
   );
 }
 
-const STATION_LABEL: Record<Station, string> = { blender: "Smoothie fruit", coffee: "Coffee", donut: "Donut fryer", bakery: "Bakery pantry" };
+
+const SHELVES: { station: Station; label: string; crate: string }[] = [
+  { station: "blender", label: "Fresh fruit", crate: "#b98552" },
+  { station: "donut", label: "Donut corner", crate: "#c98f9f" },
+  { station: "coffee", label: "Coffee roastery", crate: "#7a5038" },
+  { station: "bakery", label: "Baking pantry", crate: "#a88b62" },
+];
+
+const GREETINGS = ["Fresh strawberries today, picked this morning!", "Mind the paws on the produce, dear.", "Everything's priced on the little tags.", "Back again? I saved you the ripest fruit."];
+
+function ShopItem({ id, state, dispatch, highlight, onBought }: { id: (typeof INGREDIENT_IDS)[number]; state: GameState; dispatch: Dispatch; highlight: boolean; onBought: (text: string) => void }) {
+  const ing = INGREDIENTS[id];
+  const [qty, setQty] = useState(1);
+  const unlocked = isIngredientUnlocked(state, id);
+  const total = ing.price * qty;
+  const label = qty === 1 ? `Buy ${ing.name.toLowerCase()} for ${total} coins` : `Buy ${qty} ${ing.plural.toLowerCase()} for ${total} coins`;
+  const shelf = SHELVES.find((x) => x.station === ing.station)!;
+  return (
+    <li className="relative flex w-[9.5rem] shrink-0 flex-col items-center sm:w-40" data-testid={`shop-item-${id}`}>
+      {/* crate */}
+      <div className="relative grid h-28 w-full place-items-center rounded-t-xl border-b-4 border-black/20 pt-2" style={{ background: `repeating-linear-gradient(90deg, ${shelf.crate} 0 18px, color-mix(in srgb, ${shelf.crate} 82%, black) 18px 20px)` }}>
+        <div className={unlocked ? "drop-shadow-[0_6px_4px_rgba(0,0,0,0.35)]" : "opacity-40 grayscale"}>
+          <ProductArt id={id} size={84} />
+        </div>
+        {/* hanging price tag */}
+        <div className="absolute -right-1 -top-1 rotate-6 rounded-md bg-[#fbf6ee] px-2 py-0.5 text-center shadow-md ring-1 ring-[#d9c9b2]">
+          <span className="block text-[10px] font-semibold uppercase text-[#7a5a44]">each</span>
+          <span className="block text-sm font-extrabold text-[#c94f6d]">{ing.price}🪙</span>
+        </div>
+        {!unlocked && (
+          <div className="absolute inset-x-2 bottom-2 rounded bg-[#3b2a22]/85 px-1 py-0.5 text-center text-[11px] font-bold text-white">Arriving at level {ing.unlockLevel}</div>
+        )}
+      </div>
+      <div className="w-full rounded-b-xl bg-[#fbf6ee] p-2 text-center shadow-inner">
+        <p className="text-sm font-extrabold leading-tight text-[#3b2a22]">{ing.name}</p>
+        <p className="text-[11px] text-[#7a5a44]">In your pantry: {state.inventory[id]}</p>
+        {unlocked && (
+          <>
+            <div className="mt-1.5 flex items-center justify-center gap-1" role="group" aria-label={`${ing.name} quantity`}>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full bg-white text-lg font-bold ring-1 ring-[#eadccb] disabled:opacity-40" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={qty <= 1} aria-label={`One fewer ${ing.name.toLowerCase()}`}>
+                −
+              </button>
+              <span className="w-7 text-center font-extrabold" aria-live="polite">
+                {qty}
+              </span>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full bg-white text-lg font-bold ring-1 ring-[#eadccb] disabled:opacity-40" onClick={() => setQty((q) => Math.min(9, q + 1))} disabled={qty >= 9} aria-label={`One more ${ing.name.toLowerCase()}`}>
+                +
+              </button>
+            </div>
+            <button
+              type="button"
+              className={`${btnPrimary} mt-1.5 min-h-11 w-full px-2 text-sm${glow(highlight)}`}
+              disabled={state.coins < total}
+              aria-label={label}
+              onClick={() => {
+                const r = dispatch({ type: "buy", ingredient: id, qty }) as { ok: boolean };
+                if (r.ok) {
+                  onBought(`${qty} × ${ing.name} — ${total}🪙`);
+                  setQty(1);
+                }
+              }}
+            >
+              Buy · {total}🪙
+            </button>
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
 
 export function ShopModal({ open, onClose, state, dispatch, tutorial }: { open: boolean; onClose: () => void; state: GameState; dispatch: Dispatch; tutorial: TutorialStep }) {
+  const [receipt, setReceipt] = useState<string[]>([]);
+  const greeting = GREETINGS[state.servedCount % GREETINGS.length];
+  const close = () => {
+    setReceipt([]);
+    onClose();
+  };
   return (
-    <Modal open={open} onClose={onClose} title="Ingredient Shop">
-      <p className="mb-3 text-sm text-[#7a5a44]">
-        You have <strong data-testid="shop-coins">{state.coins}</strong> Smoothie Coins. Purchases go straight into your inventory.
-      </p>
-      {(["blender", "donut", "coffee", "bakery"] as Station[]).map((station) => (
-        <section key={station} className="mb-4">
-          <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-[#7a5a44]">{STATION_LABEL[station]}</h3>
-          <ul className="flex flex-col gap-2">
-            {INGREDIENT_IDS.filter((id) => INGREDIENTS[id].station === station).map((id) => {
-              const ing = INGREDIENTS[id];
-              const unlocked = isIngredientUnlocked(state, id);
-              const afford = state.coins >= ing.price;
-              return (
-                <li key={id} className="flex items-center gap-3 rounded-2xl bg-white p-2.5 ring-1 ring-[#eadccb]">
-                  <span className="text-3xl" aria-hidden>
-                    {ing.emoji}
-                  </span>
-                  <div className="flex-1">
-                    <p className="font-bold text-[#3b2a22]">{ing.name}</p>
-                    <p className="text-xs text-[#7a5a44]">
-                      {unlocked ? `${ing.price} coins · you have ${state.inventory[id]}` : `🔒 Unlocks at level ${ing.unlockLevel}`}
-                    </p>
-                  </div>
-                  {unlocked && (
-                    <button
-                      type="button"
-                      className={`${btnPrimary} min-h-11 text-sm${glow(tutorial === "shop" && id === "strawberry")}`}
-                      disabled={!afford}
-                      onClick={() => dispatch({ type: "buy", ingredient: id })}
-                      aria-label={`Buy ${ing.name.toLowerCase()} for ${ing.price} coins`}
-                    >
-                      Buy · {ing.price}🪙
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-      <button type="button" className={`${btnSage} w-full`} onClick={onClose}>
-        Back to the counter
-      </button>
+    <Modal open={open} onClose={close} title="Whiskers' Market, the ingredient shop" bare>
+      {/* awning */}
+      <div aria-hidden className="h-6 shrink-0 bg-[repeating-linear-gradient(90deg,#e8728f_0_28px,#fbf6ee_28px_56px)] [mask-image:radial-gradient(circle_at_14px_100%,transparent_8px,black_9px)] [mask-size:28px_100%]" />
+      <header className="flex shrink-0 items-center gap-3 bg-[#5e3d27] px-4 pb-3 pt-1 text-[#fbf6ee]">
+        <CatFace coat={CUSTOMERS.socks.coat} size={56} />
+        <div className="min-w-0 flex-1">
+          <h2 className="font-serif text-xl font-extrabold tracking-wide">Whiskers&apos; Market</h2>
+          <p className="truncate text-sm italic text-[#f3e2bd]">&ldquo;{greeting}&rdquo;</p>
+        </div>
+        <div className="rounded-xl bg-[#fbf6ee] px-3 py-1.5 text-right text-[#3b2a22] shadow-inner" aria-label={`Your wallet: ${state.coins} coins`}>
+          <span className="block text-[10px] font-bold uppercase text-[#7a5a44]">Wallet</span>
+          <span className="font-extrabold" data-testid="shop-coins">
+            {state.coins}🪙
+          </span>
+        </div>
+        <button type="button" onClick={close} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#fbf6ee] text-[#3b2a22]" aria-label="Close the market">
+          ✕
+        </button>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[linear-gradient(#9fb89a,#8aa685)] px-3 py-4">
+        {SHELVES.map(({ station, label }) => (
+          <section key={station} className="mb-5" aria-label={label}>
+            <h3 className="mb-1 inline-block rounded-md bg-[#2f3b33] px-3 py-1 font-serif text-sm font-bold text-[#f4efe4] shadow">{label}</h3>
+            <ul className="flex gap-3 overflow-x-auto px-1 pb-1 pt-2">
+              {INGREDIENT_IDS.filter((id) => INGREDIENTS[id].station === station).map((id) => (
+                <ShopItem key={id} id={id} state={state} dispatch={dispatch} highlight={tutorial === "shop" && id === "strawberry"} onBought={(t) => setReceipt((r) => [...r.slice(-3), t])} />
+              ))}
+            </ul>
+            {/* wooden shelf plank */}
+            <div aria-hidden className="h-3 rounded-sm bg-gradient-to-b from-[#a8703f] to-[#6b4428] shadow-[0_6px_8px_rgba(0,0,0,0.25)]" />
+          </section>
+        ))}
+      </div>
+
+      <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t-4 border-[#3b2a22]/30 bg-[#a8703f] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="min-w-0 flex-1 rounded-md bg-[#fbf6ee] px-3 py-1.5 font-mono text-xs text-[#3b2a22] shadow-inner" aria-live="polite" data-testid="receipt">
+          <span className="font-bold">RECEIPT</span> {receipt.length ? receipt.join(" · ") : "— nothing yet —"}
+        </div>
+        <button type="button" className={btnSage} onClick={close}>
+          Back to the counter
+        </button>
+      </footer>
     </Modal>
   );
 }

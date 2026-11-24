@@ -53,7 +53,7 @@ The e2e config starts Chromium with SwiftShader (`--use-gl=angle --use-angle=swi
 
 You start with exactly **5 Smoothie Coins** and an empty inventory. **Mochi** (a tuxedo cat) orders a **Strawberry Smoothie**.
 
-1. **Shop:** press **🛒 Shop** (it glows), then **Buy · 5🪙** next to Strawberry. You now have 0 coins and 1 strawberry.
+1. **Shop:** press **🛒 Shop** (it glows). The market only appears when you press Shop. **Whiskers' Market** opens: a striped-awning stall run by a tabby shopkeeper, with produce in wooden crates on shelves, hanging price tags, your wallet and a receipt. Press **Buy · 5🪙** under the strawberries. You now have 0 coins and 1 strawberry. Use **−/+** to buy up to 9 at once. Items you haven't unlocked yet sit in their crates marked "Arriving at level N".
 2. **Inventory:** under *Your inventory: fruit*, **tap the strawberry** to drop it into the blender. You can also **drag** it onto the blender box or the 3D café, or focus it and press **Enter/Space**.
 3. **ON:** press **⏻ ON**. The blender jiggles, the blades spin, and the strawberry pieces swirl and turn into a **light pink** smoothie.
 4. **Pour:** press **Pour**. The jar tilts and a stream fills the cup on the counter.
